@@ -83,7 +83,10 @@ export class BotApiClient {
       headers: { "content-type": "application/json" },
       body,
     });
+    return this.parse<T>(res, method);
+  }
 
+  private async parse<T>(res: Response, method: string): Promise<T> {
     let json: ApiResponse<T>;
     try {
       json = (await res.json()) as ApiResponse<T>;
@@ -102,6 +105,46 @@ export class BotApiClient {
       );
     }
     return json.result as T;
+  }
+
+  /**
+   * Send media by uploading the actual file bytes as multipart/form-data. Use
+   * this when the destination does not accept a remote URL for a given media
+   * type (e.g. voice on some platforms) — it works regardless of URL support.
+   */
+  async sendMediaUpload(
+    kind: "photo" | "video" | "document" | "audio" | "voice" | "animation",
+    o: {
+      chatId: string | number;
+      bytes: ArrayBuffer;
+      filename: string;
+      mimeType?: string;
+      caption?: string;
+      parseMode?: string;
+      replyToMessageId?: number;
+      messageThreadId?: number;
+      disableNotification?: boolean;
+      replyMarkup?: unknown;
+      performer?: string;
+      title?: string;
+    },
+  ): Promise<Message> {
+    const form = new FormData();
+    form.set("chat_id", String(o.chatId));
+    if (o.caption) form.set("caption", o.caption);
+    if (o.parseMode) form.set("parse_mode", o.parseMode);
+    if (o.replyToMessageId != null) form.set("reply_to_message_id", String(o.replyToMessageId));
+    if (o.messageThreadId != null) form.set("message_thread_id", String(o.messageThreadId));
+    if (o.disableNotification) form.set("disable_notification", "true");
+    if (o.replyMarkup) form.set("reply_markup", JSON.stringify(o.replyMarkup));
+    if (o.performer) form.set("performer", o.performer);
+    if (o.title) form.set("title", o.title);
+    const blob = new Blob([o.bytes], o.mimeType ? { type: o.mimeType } : undefined);
+    form.set(this.mediaField(kind), blob, o.filename);
+
+    const method = this.mediaMethod(kind);
+    const res = await fetch(this.endpoint(method), { method: "POST", body: form });
+    return this.parse<Message>(res, method);
   }
 
   sendMessage(o: SendTextOptions): Promise<Message> {

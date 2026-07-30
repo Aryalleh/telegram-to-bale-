@@ -3,7 +3,7 @@ import type { Platform, MessageSource } from "../types/env.js";
 import type { ChannelConnection } from "../repositories/connections.js";
 import { SyncContext } from "./context.js";
 import { entitiesToMarkdown } from "./formatter.js";
-import { extractMedia, resolveSourceUrl, isTooLarge, type MediaDescriptor } from "./media-transfer.js";
+import { extractMedia, isTooLarge, transferMedia, type MediaDescriptor } from "./media-transfer.js";
 import { postFingerprint } from "./hash.js";
 import { telegramMessageLink, baleMessageLink } from "./links.js";
 import { enqueueDeliver } from "./job-runner.js";
@@ -202,34 +202,26 @@ async function sendMediaCrossPlatform(
     return sendMediaFallback(ctx, source, route, caption, "File exceeds the transfer limit.");
   }
 
-  const url = await resolveSourceUrl(sourceApi, media.fileId);
+  const transferOpts = {
+    chatId: route.destChatId,
+    caption: caption || undefined,
+    parseMode: "Markdown" as const,
+    replyMarkup: buttons,
+    disableNotification: silent,
+    replyToMessageId,
+  };
+
   try {
-    return await destApi.sendMedia(media.kind, {
-      chatId: route.destChatId,
-      media: url,
-      caption: caption || undefined,
-      parseMode: "Markdown",
-      replyMarkup: buttons,
-      disableNotification: silent,
-      fileName: media.fileName,
-      performer: media.performer,
-      title: media.title,
-      replyToMessageId,
-    });
+    // transferMedia tries the URL first, then a multipart upload of the bytes
+    // (which is what makes voice / round video notes work when the destination
+    // won't fetch those types by URL).
+    return await transferMedia(sourceApi, destApi, media, transferOpts);
   } catch (err) {
     if (err instanceof ApiError && err.permanent) {
       const mode = await ctx.settings.get("media_fallback_mode");
       if (mode === "document" && media.kind !== "document") {
-        // Retry as a plain document.
-        return destApi.sendMedia("document", {
-          chatId: route.destChatId,
-          media: url,
-          caption: caption || undefined,
-          parseMode: "Markdown",
-          disableNotification: silent,
-          fileName: media.fileName,
-          replyToMessageId,
-        });
+        // Retry as a plain document (URL, then upload).
+        return transferMedia(sourceApi, destApi, { ...media, kind: "document" }, transferOpts);
       }
       return sendMediaFallback(ctx, source, route, caption, "Media type unsupported on destination.");
     }

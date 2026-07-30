@@ -4,7 +4,7 @@ import type { ChannelConnection } from "../repositories/connections.js";
 import type { MessageMapping } from "../repositories/message-mappings.js";
 import { SyncContext } from "./context.js";
 import { entitiesToMarkdown, identityHeader, composeMirroredBody, sourceLink } from "./formatter.js";
-import { extractMedia, resolveSourceUrl, isTooLarge } from "./media-transfer.js";
+import { extractMedia, isTooLarge, transferMedia } from "./media-transfer.js";
 import { telegramCommentLink, baleMessageLink, telegramCommentUrl, baleCommentUrl } from "./links.js";
 import { passesReplyPolicy } from "./reply-sync.js";
 import { resolvePostMapping } from "./forwards.js";
@@ -291,21 +291,17 @@ async function deliverComment(
 ): Promise<Message> {
   const destApi = ctx.api(route.destPlatform);
   const sourceApi = ctx.api(source);
-  const transferMedia = await ctx.settings.getBool("transfer_comment_media");
-  const media = transferMedia ? extractMedia(msg) : null;
+  const shouldTransferMedia = await ctx.settings.getBool("transfer_comment_media");
+  const media = shouldTransferMedia ? extractMedia(msg) : null;
 
   if (media && !isTooLarge(media)) {
     try {
-      const url = await resolveSourceUrl(sourceApi, media.fileId);
-      return await destApi.sendMedia(media.kind, {
+      // URL first, then multipart upload — makes voice / round video notes work.
+      return await transferMedia(sourceApi, destApi, media, {
         chatId: route.destChatId,
-        media: url,
         caption: composedText,
         parseMode: "Markdown",
         replyToMessageId: replyToDestId,
-        fileName: media.fileName,
-        performer: media.performer,
-        title: media.title,
       });
     } catch (err) {
       if (!(err instanceof ApiError) || !err.permanent) throw err;

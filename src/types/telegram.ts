@@ -74,6 +74,16 @@ export interface Animation extends FileBase {
   duration: number;
 }
 
+/** Round "video message" (video note). */
+export interface VideoNote {
+  file_id: string;
+  file_unique_id: string;
+  length: number;
+  duration: number;
+  thumbnail?: PhotoSize;
+  file_size?: number;
+}
+
 export interface Location {
   longitude: number;
   latitude: number;
@@ -122,6 +132,7 @@ export interface Message {
 
   photo?: PhotoSize[];
   video?: Video;
+  video_note?: VideoNote;
   document?: FileBase;
   audio?: Audio;
   voice?: Voice;

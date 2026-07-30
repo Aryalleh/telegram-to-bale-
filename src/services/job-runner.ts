@@ -1,6 +1,6 @@
 import type { Platform } from "../types/env.js";
 import { SyncContext } from "./context.js";
-import { resolveSourceUrl, type MediaKind } from "./media-transfer.js";
+import { transferMedia, type MediaKind } from "./media-transfer.js";
 import { backoffSeconds, isRetryable } from "./retry.js";
 import { ApiError } from "./bot-api.js";
 
@@ -50,19 +50,25 @@ async function runDeliver(ctx: SyncContext, payload: DeliverPayload): Promise<nu
   let messageId: number;
 
   if (payload.kind === "media" && payload.fileId && payload.mediaKind && payload.sourcePlatform) {
-    const url = await resolveSourceUrl(ctx.api(payload.sourcePlatform), payload.fileId);
-    const sent = await api.sendMedia(payload.mediaKind, {
-      chatId: payload.destChatId,
-      media: url,
-      caption: payload.text,
-      parseMode: payload.parseMode,
-      replyToMessageId: payload.replyToMessageId,
-      messageThreadId: payload.messageThreadId,
-      disableNotification: payload.disableNotification,
-      fileName: payload.fileName,
-      performer: payload.performer,
-      title: payload.title,
-    });
+    const sent = await transferMedia(
+      ctx.api(payload.sourcePlatform),
+      api,
+      {
+        kind: payload.mediaKind,
+        fileId: payload.fileId,
+        fileName: payload.fileName,
+        performer: payload.performer,
+        title: payload.title,
+      },
+      {
+        chatId: payload.destChatId,
+        caption: payload.text,
+        parseMode: payload.parseMode,
+        replyToMessageId: payload.replyToMessageId,
+        messageThreadId: payload.messageThreadId,
+        disableNotification: payload.disableNotification,
+      },
+    );
     messageId = sent.message_id;
   } else if (payload.kind === "location" && payload.latitude != null && payload.longitude != null) {
     const sent = await api.sendLocation(payload.destChatId, payload.latitude, payload.longitude, {
