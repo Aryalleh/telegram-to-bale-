@@ -7,6 +7,7 @@ import { entitiesToMarkdown, identityHeader, composeMirroredBody, sourceLink } f
 import { extractMedia, resolveSourceUrl, isTooLarge } from "./media-transfer.js";
 import { telegramCommentLink, baleMessageLink } from "./links.js";
 import { passesReplyPolicy } from "./reply-sync.js";
+import { resolveThreadTarget } from "./forwards.js";
 import { enqueueDeliver } from "./job-runner.js";
 import { ApiError } from "./bot-api.js";
 
@@ -37,7 +38,11 @@ export async function resolveDiscussionRoute(
 }
 
 function fromLabel(source: Platform): string {
-  return source === "telegram" ? "from Telegram" : "from Bale";
+  return source === "telegram" ? "از تلگرام" : "از بله";
+}
+
+function sourceLinkLabel(source: Platform): string {
+  return source === "telegram" ? "مشاهده کامنت اصلی در تلگرام" : "مشاهده کامنت اصلی در بله";
 }
 
 function commentSource(source: Platform): MessageSource {
@@ -82,8 +87,14 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
 
   let replyToDestId: number | undefined;
   if (parentMapping) {
+    // Reply to another (already mirrored) comment -> attach to its twin.
     const destId = route.destPlatform === "bale" ? parentMapping.bale_message_id : parentMapping.telegram_message_id;
     if (destId) replyToDestId = Number(destId);
+  } else if (msg.reply_to_message?.is_automatic_forward) {
+    // Top-level comment on a post -> thread it under the mirrored post's
+    // auto-forwarded copy in the destination discussion group.
+    const target = await resolveThreadTarget(ctx, source, msg.reply_to_message);
+    if (target) replyToDestId = target;
   }
 
   // Build the mirrored body.
@@ -102,7 +113,7 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
   let linkLine = "";
   if (await ctx.settings.getBool("add_source_links")) {
     const url = buildSourceLink(source, route.connection, msg);
-    linkLine = sourceLink(url, source === "telegram" ? "View the original comment on Telegram" : "View the original comment on Bale");
+    linkLine = sourceLink(url, sourceLinkLabel(source));
   }
 
   const composed = composeMirroredBody({ header, body, sourceLinkLine: linkLine || undefined });

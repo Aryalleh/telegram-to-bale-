@@ -31,7 +31,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   mirror_url_buttons: "true",
   send_silently: "false",
   media_fallback_mode: "document", // document | source_link | notify_admin
-  unsupported_content_message: "This content type could not be transferred. See the original message.",
+  unsupported_content_message: "این نوع محتوا قابل انتقال نبود. لطفاً پیام اصلی را ببینید.",
 
   // Ops
   admin_notification_chat: "",

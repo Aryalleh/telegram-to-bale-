@@ -4,6 +4,7 @@ import { SyncContext } from "./context.js";
 import { syncChannelPost, syncEditedChannelPost } from "./post-sync.js";
 import { syncComment, syncEditedComment } from "./comment-sync.js";
 import { handleCommand } from "./commands.js";
+import { recordAutoForward } from "./forwards.js";
 import { isChatAllowed } from "../security/allowlists.js";
 
 /**
@@ -49,14 +50,20 @@ async function routeUpdate(ctx: SyncContext, platform: Platform, update: Update)
     return;
   }
 
-  // --- Group / private messages ---
+  // --- Group / private / channel messages ---
+  // Some platforms (notably Bale) deliver channel posts as `message` with
+  // chat.type === "channel" rather than as `channel_post`, so we branch on the
+  // chat type here instead of relying on the update key alone.
   if (update.message) {
     await routeMessage(ctx, platform, update.message, connections);
     return;
   }
   if (update.edited_message) {
     const m = update.edited_message;
-    if (await isChatAllowed(m.chat.id, connections, ctx.settings)) {
+    if (!(await isChatAllowed(m.chat.id, connections, ctx.settings))) return;
+    if (m.chat.type === "channel") {
+      await syncEditedChannelPost(ctx, platform, m);
+    } else {
       await syncEditedComment(ctx, platform, m);
     }
     return;
@@ -77,6 +84,19 @@ async function routeMessage(
 
   const allowed = await isChatAllowed(msg.chat.id, connections, ctx.settings);
   if (!allowed) return;
+
+  // A channel post delivered as a plain message (Bale behavior).
+  if (msg.chat.type === "channel") {
+    await syncChannelPost(ctx, platform, msg);
+    return;
+  }
+
+  // The auto-forwarded copy of a channel post inside the discussion group:
+  // record its id (for comment threading) but do not mirror it as a comment.
+  if (msg.is_automatic_forward) {
+    await recordAutoForward(ctx, platform, msg);
+    return;
+  }
 
   // Allow admin commands issued inside the discussion group too.
   if (msg.text?.startsWith("/")) {

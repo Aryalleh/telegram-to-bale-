@@ -234,6 +234,12 @@ Admin user IDs are configured via the `admin_telegram_user_ids` /
 
 ## Known limitations
 
+- **Comment threading under posts** relies on the auto-forwarded copy of the
+  post appearing in the discussion group with a forward reference back to the
+  channel post. The system records that copy's id and replies to it so mirrored
+  comments thread under the right post; if a platform does not provide the
+  forward reference, the comment is still delivered but as a standalone group
+  message.
 - **Media albums** are transferred item-by-item (each linked by media-group ID)
   rather than aggregated into a single `sendMediaGroup` call — true
   cross-request album buffering would require a Durable Object or queue.

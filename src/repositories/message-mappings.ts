@@ -27,6 +27,8 @@ export interface MessageMapping {
   bale_chat_id: string | null;
   bale_message_id: string | null;
   bale_media_group_id: string | null;
+  telegram_discussion_message_id: string | null;
+  bale_discussion_message_id: string | null;
   parent_mapping_id: number | null;
   content_hash: string | null;
   status: MappingStatus;
@@ -141,6 +143,15 @@ export class MappingsRepo {
          WHERE id = ?`,
       )
       .bind(tgChatId, tgMessageId, tgThreadId ?? null, id)
+      .run();
+  }
+
+  /** Record the discussion-group auto-forward message id of a channel post. */
+  async setDiscussionMessageId(id: number, platform: "telegram" | "bale", discussionMsgId: string): Promise<void> {
+    const col = platform === "telegram" ? "telegram_discussion_message_id" : "bale_discussion_message_id";
+    await this.db
+      .prepare(`UPDATE message_mappings SET ${col} = ?, updated_at = datetime('now') WHERE id = ?`)
+      .bind(discussionMsgId, id)
       .run();
   }
 

@@ -110,6 +110,11 @@ export interface Message {
   is_automatic_forward?: boolean;
   reply_to_message?: Message;
 
+  /** Forward references (present on the discussion-group auto-forward copy). */
+  forward_from_chat?: Chat;
+  forward_from_message_id?: number;
+  forward_origin?: { type?: string; chat?: Chat; message_id?: number };
+
   text?: string;
   caption?: string;
   entities?: MessageEntity[];
