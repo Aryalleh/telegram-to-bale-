@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>داشبورد همگام‌سازی تلگرام ↔ بله</title>
+    <style>
+      :root {
+        --bg: #0f1720; --panel: #172230; --panel2: #1e2c3d; --border: #2a3b50;
+        --text: #e6edf3; --muted: #93a4b8; --accent: #3b82f6; --ok: #22c55e;
+        --err: #ef4444; --warn: #f59e0b; --radius: 12px;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--bg); color: var(--text);
+        font-family: Vazirmatn, "Segoe UI", Tahoma, system-ui, sans-serif; line-height: 1.6;
+      }
+      header {
+        padding: 20px 24px; border-bottom: 1px solid var(--border);
+        display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+        background: linear-gradient(180deg, #182534, #0f1720);
+      }
+      header h1 { font-size: 18px; margin: 0; }
+      .wrap { max-width: 1040px; margin: 0 auto; padding: 20px 16px 80px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+      .card {
+        background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+        padding: 18px; margin-bottom: 16px;
+      }
+      .card h2 { margin: 0 0 12px; font-size: 15px; color: var(--text); }
+      label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+      input, select {
+        width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border);
+        background: var(--panel2); color: var(--text); font-family: inherit; font-size: 14px;
+      }
+      input[type="checkbox"] { width: auto; }
+      .row { display: flex; gap: 10px; flex-wrap: wrap; }
+      .row > div { flex: 1; min-width: 140px; }
+      button {
+        background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 9px 16px;
+        font-size: 14px; cursor: pointer; font-family: inherit; margin-top: 12px;
+      }
+      button.secondary { background: var(--panel2); border: 1px solid var(--border); }
+      button.danger { background: var(--err); }
+      button:hover { opacity: 0.92; }
+      .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; }
+      .pill.ok { background: rgba(34,197,94,.15); color: var(--ok); }
+      .pill.err { background: rgba(239,68,68,.15); color: var(--err); }
+      .pill.warn { background: rgba(245,158,11,.15); color: var(--warn); }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th, td { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--border); }
+      th { color: var(--muted); font-weight: 600; }
+      code { background: var(--panel2); padding: 2px 6px; border-radius: 6px; font-size: 12px; direction: ltr; display: inline-block; }
+      .muted { color: var(--muted); font-size: 13px; }
+      .toggle-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 18px; }
+      .toggle-grid label { display: flex; align-items: center; gap: 8px; margin: 4px 0; color: var(--text); }
+      #toast {
+        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+        background: var(--panel2); border: 1px solid var(--border); padding: 10px 18px;
+        border-radius: 10px; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 10;
+      }
+      #toast.show { opacity: 1; }
+      .hidden { display: none; }
+      .conn-item { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; background: var(--panel2); }
+      a { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>🔁 همگام‌سازی تلگرام ↔ بله</h1>
+      <div id="conn-state" class="muted">قفل شده</div>
+    </header>
+
+    <div class="wrap">
+      <!-- Auth -->
+      <div class="card" id="auth-card">
+        <h2>🔐 ورود مدیر</h2>
+        <p class="muted">
+          توکن مدیریت (<code>ADMIN_API_SECRET</code>) را وارد کنید. این توکن با
+          <code>wrangler secret put ADMIN_API_SECRET</code> تنظیم می‌شود و در مرورگر ذخیره می‌شود.
+        </p>
+        <label>Admin API Secret</label>
+        <input id="admin-token" type="password" placeholder="ADMIN_API_SECRET" autocomplete="off" />
+        <button onclick="login()">ورود</button>
+      </div>
+
+      <div id="app" class="hidden">
+        <!-- Status -->
+        <div class="card">
+          <h2>📊 وضعیت سیستم</h2>
+          <div class="grid" id="status-grid"></div>
+          <div class="row">
+            <button class="secondary" onclick="refresh()">به‌روزرسانی</button>
+            <button class="secondary" onclick="doAction('retry')">تلاش مجدد کارهای ناموفق</button>
+            <button class="secondary" onclick="doAction('pause')">توقف</button>
+            <button class="secondary" onclick="doAction('resume')">ادامه</button>
+          </div>
+        </div>
+
+        <!-- Secrets / tokens -->
+        <div class="card">
+          <h2>🔑 وضعیت توکن‌ها و رمزها</h2>
+          <p class="muted">
+            به دلایل امنیتی، توکن‌های ربات هرگز در پایگاه‌داده ذخیره نمی‌شوند. آن‌ها را با دستورهای زیر
+            تنظیم کنید (فقط وضعیت «تنظیم‌شده/نشده» اینجا نمایش داده می‌شود):
+          </p>
+          <table id="secrets-table"></table>
+          <div class="card" style="background: var(--panel2); margin-top: 12px;">
+            <div class="muted">دستورهای تنظیم رمزها:</div>
+            <div><code>wrangler secret put TELEGRAM_BOT_TOKEN</code></div>
+            <div><code>wrangler secret put BALE_BOT_TOKEN</code></div>
+            <div><code>wrangler secret put TELEGRAM_WEBHOOK_SECRET</code></div>
+            <div><code>wrangler secret put BALE_WEBHOOK_SECRET</code></div>
+            <div><code>wrangler secret put ADMIN_API_SECRET</code></div>
+          </div>
+          <button onclick="registerWebhooks()">ثبت خودکار وب‌هوک‌ها</button>
+          <div id="webhook-result" class="muted"></div>
+        </div>
+
+        <!-- Connections -->
+        <div class="card">
+          <h2>🔗 اتصال کانال‌ها و گروه‌ها</h2>
+          <p class="muted">شناسه‌های عددی کانال و گروه گفتگو را برای هر پلتفرم وارد کنید.</p>
+          <div id="connections-list"></div>
+          <div class="conn-item">
+            <div class="row">
+              <div>
+                <label>شناسه کانال تلگرام</label>
+                <input id="c-tg-ch" placeholder="-100..." />
+              </div>
+              <div>
+                <label>یوزرنیم کانال تلگرام</label>
+                <input id="c-tg-un" placeholder="mychannel" />
+              </div>
+              <div>
+                <label>شناسه گروه گفتگوی تلگرام</label>
+                <input id="c-tg-dg" placeholder="-100..." />
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label>شناسه کانال بله</label>
+                <input id="c-bl-ch" placeholder="-100..." />
+              </div>
+              <div>
+                <label>یوزرنیم کانال بله</label>
+                <input id="c-bl-un" placeholder="mychannel" />
+              </div>
+              <div>
+                <label>شناسه گروه گفتگوی بله</label>
+                <input id="c-bl-dg" placeholder="-100..." />
+              </div>
+            </div>
+            <button onclick="addConnection()">افزودن اتصال</button>
+          </div>
+        </div>
+
+        <!-- Settings -->
+        <div class="card">
+          <h2>⚙️ تنظیمات رفتار</h2>
+          <div class="toggle-grid" id="toggles"></div>
+          <h2 style="margin-top: 18px;">مقادیر متنی</h2>
+          <div id="text-settings"></div>
+          <button onclick="saveSettings()">ذخیره تنظیمات</button>
+        </div>
+
+        <!-- Recent activity -->
+        <div class="card">
+          <h2>🗂 آخرین نگاشت پیام‌ها</h2>
+          <table id="mappings-table"></table>
+        </div>
+        <div class="card">
+          <h2>⚠️ آخرین خطاها</h2>
+          <table id="errors-table"></table>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+      let TOKEN = localStorage.getItem("tb_admin_token") || "";
+      let STATE = null;
+
+      const BOOL_KEYS = [
+        "sync_posts", "sync_comments", "sync_bale_to_telegram_replies",
+        "sync_telegram_to_bale", "sync_bale_to_telegram", "paused",
+        "paused_posts", "paused_comments", "label_from_telegram", "label_from_bale",
+        "add_source_links", "include_usernames", "include_profile_links",
+        "include_timestamps", "transfer_comment_media", "transfer_standalone_bale_messages",
+        "mirror_url_buttons", "send_silently",
+      ];
+      const TEXT_KEYS = [
+        "media_fallback_mode", "unsupported_content_message", "admin_notification_chat",
+        "max_retry_count", "admin_telegram_user_ids", "admin_bale_user_ids",
+        "allowed_telegram_channel_id", "allowed_telegram_discussion_id",
+        "allowed_bale_channel_id", "allowed_bale_discussion_id",
+      ];
+      const LABELS = {
+        sync_posts: "همگام‌سازی پست‌ها", sync_comments: "همگام‌سازی کامنت‌ها",
+        sync_bale_to_telegram_replies: "پاسخ بله ← تلگرام",
+        sync_telegram_to_bale: "تلگرام ← بله", sync_bale_to_telegram: "بله ← تلگرام",
+        paused: "توقف کامل", paused_posts: "توقف پست‌ها", paused_comments: "توقف کامنت‌ها",
+        label_from_telegram: "برچسب «از تلگرام»", label_from_bale: "برچسب «از بله»",
+        add_source_links: "افزودن لینک منبع", include_usernames: "نمایش یوزرنیم",
+        include_profile_links: "لینک پروفایل", include_timestamps: "نمایش زمان",
+        transfer_comment_media: "انتقال رسانه کامنت‌ها",
+        transfer_standalone_bale_messages: "انتقال پیام‌های مستقل بله",
+        mirror_url_buttons: "انتقال دکمه‌های لینک", send_silently: "ارسال بی‌صدا",
+        media_fallback_mode: "حالت جایگزین رسانه", unsupported_content_message: "پیام محتوای پشتیبانی‌نشده",
+        admin_notification_chat: "چت اعلان مدیر", max_retry_count: "حداکثر تعداد تلاش",
+        admin_telegram_user_ids: "شناسه مدیران تلگرام", admin_bale_user_ids: "شناسه مدیران بله",
+        allowed_telegram_channel_id: "کانال مجاز تلگرام", allowed_telegram_discussion_id: "گروه مجاز تلگرام",
+        allowed_bale_channel_id: "کانال مجاز بله", allowed_bale_discussion_id: "گروه مجاز بله",
+      };
+
+      function toast(msg) {
+        const t = document.getElementById("toast");
+        t.textContent = msg; t.classList.add("show");
+        setTimeout(() => t.classList.remove("show"), 2200);
+      }
+
+      async function api(path, method = "GET", body) {
+        const res = await fetch("/admin/" + path, {
+          method,
+          headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        if (res.status === 401) { logout(); throw new Error("unauthorized"); }
+        return res.json();
+      }
+
+      function login() {
+        TOKEN = document.getElementById("admin-token").value.trim();
+        if (!TOKEN) return toast("توکن را وارد کنید");
+        localStorage.setItem("tb_admin_token", TOKEN);
+        refresh();
+      }
+      function logout() {
+        localStorage.removeItem("tb_admin_token"); TOKEN = "";
+        document.getElementById("app").classList.add("hidden");
+        document.getElementById("auth-card").classList.remove("hidden");
+        document.getElementById("conn-state").textContent = "قفل شده";
+      }
+
+      async function refresh() {
+        try {
+          const data = await api("status");
+          if (data.error) return toast("خطا: " + data.error);
+          STATE = data;
+          document.getElementById("auth-card").classList.add("hidden");
+          document.getElementById("app").classList.remove("hidden");
+          document.getElementById("conn-state").innerHTML =
+            '<span class="pill ok">متصل</span>';
+          render();
+        } catch (e) { toast("ورود ناموفق"); }
+      }
+
+      function pill(v) {
+        const ok = v === "connected" || v === "ok" || v === true;
+        const cls = ok ? "ok" : (v === "error" ? "err" : "warn");
+        return '<span class="pill ' + cls + '">' + v + "</span>";
+      }
+
+      function render() {
+        const s = STATE.snapshot;
+        document.getElementById("status-grid").innerHTML = [
+          card("تلگرام", pill(s.telegram)), card("بله", pill(s.bale)),
+          card("پایگاه‌داده", pill(s.database)), card("توقف", pill(s.sync_paused)),
+          card("کارهای در صف", s.pending_jobs), card("خطاهای امروز", s.recent_errors),
+        ].join("");
+
+        // secrets
+        document.getElementById("secrets-table").innerHTML =
+          "<tr><th>رمز</th><th>وضعیت</th></tr>" +
+          Object.entries(STATE.secrets).map(([k, v]) =>
+            "<tr><td><code>" + k + "</code></td><td>" + pill(v ? "تنظیم‌شده" : "تنظیم‌نشده") + "</td></tr>").join("");
+
+        // connections
+        document.getElementById("connections-list").innerHTML = STATE.connections.map(c =>
+          '<div class="conn-item"><b>#' + c.id + '</b> ' + pill(c.is_enabled ? "فعال" : "غیرفعال") +
+          '<div class="muted">تلگرام: ' + (c.telegram_channel_id || "—") + " / " + (c.telegram_discussion_id || "—") +
+          '<br>بله: ' + (c.bale_channel_id || "—") + " / " + (c.bale_discussion_id || "—") + "</div>" +
+          '<button class="danger" onclick="delConnection(' + c.id + ')">حذف</button></div>').join("") ||
+          '<div class="muted">هنوز اتصالی ثبت نشده است.</div>';
+
+        // toggles
+        document.getElementById("toggles").innerHTML = BOOL_KEYS.map(k =>
+          '<label><input type="checkbox" id="set-' + k + '" ' +
+          (STATE.settings[k] === "true" ? "checked" : "") + "> " + (LABELS[k] || k) + "</label>").join("");
+
+        // text settings
+        document.getElementById("text-settings").innerHTML = TEXT_KEYS.map(k =>
+          "<label>" + (LABELS[k] || k) + "</label><input id='set-" + k + "' value='" +
+          (STATE.settings[k] || "").replace(/'/g, "&#39;") + "'>").join("");
+
+        // mappings
+        document.getElementById("mappings-table").innerHTML =
+          "<tr><th>#</th><th>نوع</th><th>تلگرام</th><th>بله</th><th>وضعیت</th></tr>" +
+          STATE.recent_mappings.map(m =>
+            "<tr><td>" + m.id + "</td><td>" + m.message_type + "</td><td>" +
+            (m.telegram_message_id || "—") + "</td><td>" + (m.bale_message_id || "—") +
+            "</td><td>" + m.status + "</td></tr>").join("");
+
+        // errors
+        document.getElementById("errors-table").innerHTML =
+          "<tr><th>زمان</th><th>پلتفرم</th><th>عملیات</th><th>خطا</th></tr>" +
+          (STATE.recent_errors.length ? STATE.recent_errors.map(e =>
+            "<tr><td>" + (e.created_at || "") + "</td><td>" + (e.platform || "") + "</td><td>" +
+            (e.operation || "") + "</td><td>" + (e.error_message || "") + "</td></tr>").join("")
+            : "<tr><td colspan=4 class='muted'>بدون خطا</td></tr>");
+      }
+
+      function card(title, val) {
+        return '<div class="card" style="margin:0"><div class="muted">' + title + "</div><div style='font-size:18px'>" + val + "</div></div>";
+      }
+
+      async function saveSettings() {
+        const payload = {};
+        for (const k of BOOL_KEYS) payload[k] = document.getElementById("set-" + k).checked ? "true" : "false";
+        for (const k of TEXT_KEYS) payload[k] = document.getElementById("set-" + k).value;
+        const r = await api("settings", "POST", payload);
+        if (r.ok) { toast("تنظیمات ذخیره شد"); STATE.settings = r.settings; }
+      }
+
+      async function addConnection() {
+        const body = {
+          telegram_channel_id: val("c-tg-ch"), telegram_channel_username: val("c-tg-un"),
+          telegram_discussion_id: val("c-tg-dg"), bale_channel_id: val("c-bl-ch"),
+          bale_channel_username: val("c-bl-un"), bale_discussion_id: val("c-bl-dg"),
+        };
+        const r = await api("connections", "POST", body);
+        if (r.ok) { toast("اتصال ثبت شد"); STATE.connections = r.connections; render();
+          ["c-tg-ch","c-tg-un","c-tg-dg","c-bl-ch","c-bl-un","c-bl-dg"].forEach(id => document.getElementById(id).value = ""); }
+      }
+      async function delConnection(id) {
+        if (!confirm("حذف اتصال #" + id + "؟")) return;
+        const r = await api("connections/" + id, "DELETE");
+        if (r.ok) { toast("حذف شد"); STATE.connections = r.connections; render(); }
+      }
+      async function doAction(a) {
+        const r = await api(a, "POST", {});
+        toast(r.ok ? "انجام شد" : "خطا"); refresh();
+      }
+      async function registerWebhooks() {
+        const r = await api("register-webhooks", "POST", { base_url: location.origin });
+        document.getElementById("webhook-result").textContent = JSON.stringify(r.results || r);
+        toast("درخواست ثبت وب‌هوک ارسال شد");
+      }
+      const val = (id) => document.getElementById(id).value.trim();
+
+      if (TOKEN) refresh();
+    </script>
+  </body>
+</html>

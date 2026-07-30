@@ -1,0 +1,22 @@
+{
+  "name": "telegram-bale-sync",
+  "version": "1.0.0",
+  "description": "Bidirectional synchronization between a Telegram channel/discussion group and a Bale channel/discussion group, running on Cloudflare Workers + D1.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "db:init:local": "wrangler d1 migrations apply telegram_bale_sync --local",
+    "db:init:remote": "wrangler d1 migrations apply telegram_bale_sync --remote",
+    "tail": "wrangler tail"
+  },
+  "keywords": ["telegram", "bale", "cloudflare-workers", "d1", "sync"],
+  "license": "MIT",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "typescript": "^5.5.4",
+    "wrangler": "^3.78.0"
+  }
+}

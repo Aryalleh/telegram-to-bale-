@@ -1,0 +1,60 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "telegram-bale-sync",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+
+  // Drain the durable retry queue once a minute.
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+
+  // ---------------------------------------------------------------------------
+  // Cloudflare D1 database binding.
+  // Create it with:  wrangler d1 create telegram_bale_sync
+  // then copy the returned database_id below.
+  // ---------------------------------------------------------------------------
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "telegram_bale_sync",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // ---------------------------------------------------------------------------
+  // Non-secret configuration. Secrets (bot tokens, webhook secrets, admin API
+  // secret) must be set with `wrangler secret put <NAME>` and are NEVER stored
+  // in this file or in source control.
+  //
+  // Required secrets:
+  //   TELEGRAM_BOT_TOKEN
+  //   BALE_BOT_TOKEN
+  //   TELEGRAM_WEBHOOK_SECRET   (used in the webhook path + secret-token header)
+  //   BALE_WEBHOOK_SECRET       (used in the webhook path)
+  //   ADMIN_API_SECRET          (bearer token for the admin dashboard/API)
+  // ---------------------------------------------------------------------------
+  "vars": {
+    "TELEGRAM_API_BASE": "https://api.telegram.org",
+    "BALE_API_BASE": "https://tapi.bale.ai"
+  },
+
+  // Static admin dashboard (public/dashboard.html) served via the ASSETS binding.
+  // The Worker runs first and only delegates the dashboard path to assets.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  }
+
+  // Optional: enable a queue for stronger async retry handling.
+  // "queues": {
+  //   "producers": [{ "binding": "SYNC_QUEUE", "queue": "telegram-bale-sync" }],
+  //   "consumers": [{ "queue": "telegram-bale-sync", "max_batch_size": 10 }]
+  // }
+}

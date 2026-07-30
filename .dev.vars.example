@@ -1,0 +1,8 @@
+# Copy to `.dev.vars` for local `wrangler dev`. NEVER commit real secrets.
+# For production, set each of these with: wrangler secret put <NAME>
+
+TELEGRAM_BOT_TOKEN=""
+BALE_BOT_TOKEN=""
+TELEGRAM_WEBHOOK_SECRET=""
+BALE_WEBHOOK_SECRET=""
+ADMIN_API_SECRET=""
