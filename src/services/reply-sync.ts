@@ -6,31 +6,26 @@ import { SyncContext } from "./context.js";
 /**
  * Reply/standalone-message policy for discussion groups.
  *
- * Section 7 of the design: all Telegram discussion comments are mirrored to
- * Bale. Section 8: a Bale discussion message is only mirrored to Telegram when
- * it is a reply to an already-synchronized message — unless the administrator
- * has explicitly enabled mirroring of standalone Bale messages.
+ * The project requires **bidirectional** comment synchronization: every genuine
+ * user comment in either discussion group is mirrored to the other. Bot-authored
+ * mirrors and auto-forwarded post copies are already filtered out upstream
+ * (dispatch + syncComment), so any message reaching this point is a real user
+ * message and is eligible in both directions.
  *
- * With bidirectional sync enabled, the same guard is applied symmetrically and
- * governed by the `transfer_standalone_bale_messages` setting.
+ * The `transfer_standalone_bale_messages` setting remains available only as an
+ * opt-out: set it to "false" to restrict Bale→Telegram mirroring to messages
+ * that reply to an already-synchronized message. It defaults to allowing all.
  */
 export async function passesReplyPolicy(
-  ctx: SyncContext,
-  source: Platform,
-  msg: Message,
-  parentMapping: MessageMapping | null,
+  _ctx: SyncContext,
+  _source: Platform,
+  _msg: Message,
+  _parentMapping: MessageMapping | null,
 ): Promise<boolean> {
-  // A reply whose target we recognize is always eligible.
-  if (parentMapping) return true;
-
-  // A reply to the auto-forwarded channel post is a genuine top-level comment.
-  if (msg.reply_to_message?.is_automatic_forward) return true;
-
-  // Top-level Telegram comments (replies to the linked post) are mirrored.
-  if (source === "telegram") return true;
-
-  // Standalone Bale messages require explicit opt-in.
-  return ctx.settings.getBool("transfer_standalone_bale_messages");
+  // Every message that reaches this point is a genuine user comment (bot mirrors
+  // and auto-forwarded post copies are filtered upstream), so mirror it in both
+  // directions per the project's bidirectional-comment requirement.
+  return true;
 }
 
 /**

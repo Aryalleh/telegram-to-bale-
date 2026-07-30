@@ -181,6 +181,30 @@ export class MappingsRepo {
     return res.results ?? [];
   }
 
+  /**
+   * Most recent channel_post mapping for a connection that has a message on
+   * `platform` but no recorded discussion-forward id yet. Used as a fallback to
+   * link an auto-forwarded post copy when the platform omits forward references.
+   */
+  async latestPostAwaitingDiscussion(
+    platform: "telegram" | "bale",
+    connectionId: number,
+  ): Promise<MessageMapping | null> {
+    const discCol = platform === "telegram" ? "telegram_discussion_message_id" : "bale_discussion_message_id";
+    const msgCol = platform === "telegram" ? "telegram_message_id" : "bale_message_id";
+    return (
+      (await this.db
+        .prepare(
+          `SELECT * FROM message_mappings
+           WHERE message_type = 'channel_post' AND connection_id = ?
+             AND ${discCol} IS NULL AND ${msgCol} IS NOT NULL
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .bind(connectionId)
+        .first<MessageMapping>()) ?? null
+    );
+  }
+
   async recent(limit = 20): Promise<MessageMapping[]> {
     const res = await this.db
       .prepare("SELECT * FROM message_mappings ORDER BY id DESC LIMIT ?")

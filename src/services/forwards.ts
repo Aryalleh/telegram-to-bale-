@@ -1,5 +1,6 @@
 import type { Message } from "../types/telegram.js";
 import type { Platform } from "../types/env.js";
+import type { ChannelConnection } from "../repositories/connections.js";
 import { SyncContext } from "./context.js";
 
 /**
@@ -20,13 +21,26 @@ export function forwardedPostRef(m: Message): { chatId: string; messageId: strin
  * record its message id against the channel_post mapping. This lets us later
  * reply to it so mirrored comments are threaded under the right post.
  */
-export async function recordAutoForward(ctx: SyncContext, platform: Platform, msg: Message): Promise<void> {
+export async function recordAutoForward(
+  ctx: SyncContext,
+  platform: Platform,
+  msg: Message,
+  connection?: ChannelConnection | null,
+): Promise<void> {
   const ref = forwardedPostRef(msg);
-  if (!ref) return;
-  const mapping =
-    platform === "telegram"
-      ? await ctx.mappings.byTelegram(ref.chatId, ref.messageId)
-      : await ctx.mappings.byBale(ref.chatId, ref.messageId);
+  let mapping = null;
+  if (ref) {
+    mapping =
+      platform === "telegram"
+        ? await ctx.mappings.byTelegram(ref.chatId, ref.messageId)
+        : await ctx.mappings.byBale(ref.chatId, ref.messageId);
+  }
+  // Fallback: some platforms omit forward references on the auto-forward copy.
+  // Link it to the most recent post from this connection still missing its
+  // discussion-forward id (posts forward in order, so this matches reliably).
+  if (!mapping && connection) {
+    mapping = await ctx.mappings.latestPostAwaitingDiscussion(platform, connection.id);
+  }
   if (!mapping) return;
   await ctx.mappings.setDiscussionMessageId(mapping.id, platform, String(msg.message_id));
 }

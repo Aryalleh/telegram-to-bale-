@@ -91,10 +91,25 @@ async function routeMessage(
     return;
   }
 
-  // The auto-forwarded copy of a channel post inside the discussion group:
-  // record its id (for comment threading) but do not mirror it as a comment.
-  if (msg.is_automatic_forward) {
-    await recordAutoForward(ctx, platform, msg);
+  const chatId = String(msg.chat.id);
+  const conn = connections.find(
+    (c) =>
+      String(c.telegram_discussion_id) === chatId ||
+      String(c.bale_discussion_id) === chatId ||
+      String(c.telegram_channel_id) === chatId ||
+      String(c.bale_channel_id) === chatId,
+  );
+  const channelId = platform === "telegram" ? conn?.telegram_channel_id : conn?.bale_channel_id;
+
+  // The auto-forwarded copy of a channel post inside the discussion group is not
+  // a user comment. Detect it via is_automatic_forward, or (when a platform omits
+  // that flag) by its sender_chat being the linked channel. Record its id for
+  // comment threading, but never mirror it as a comment.
+  const isPostForward =
+    msg.is_automatic_forward === true ||
+    (msg.sender_chat != null && channelId != null && String(msg.sender_chat.id) === String(channelId));
+  if (isPostForward) {
+    await recordAutoForward(ctx, platform, msg, conn ?? null);
     return;
   }
 
