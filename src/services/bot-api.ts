@@ -255,6 +255,19 @@ export class BotApiClient {
     return this.call("getMe", {});
   }
 
+  /** Set a chat's photo by uploading the image bytes (multipart). */
+  async setChatPhoto(chatId: string | number, bytes: ArrayBuffer, filename = "photo.jpg", mimeType = "image/jpeg"): Promise<boolean> {
+    const form = new FormData();
+    form.set("chat_id", String(chatId));
+    form.set("photo", new Blob([bytes], { type: mimeType }), filename);
+    const res = await fetch(this.endpoint("setChatPhoto"), { method: "POST", body: form });
+    return this.parse<boolean>(res, "setChatPhoto");
+  }
+
+  deleteChatPhoto(chatId: string | number): Promise<boolean> {
+    return this.call<boolean>("deleteChatPhoto", { chat_id: chatId });
+  }
+
   getFile(fileId: string): Promise<TgFile> {
     return this.call<TgFile>("getFile", { file_id: fileId });
   }

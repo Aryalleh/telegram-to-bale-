@@ -141,6 +141,18 @@ export interface Message {
   contact?: Contact;
 
   reply_markup?: InlineKeyboardMarkup;
+
+  // --- Service messages (not user content; mirroring skips these) ---
+  new_chat_members?: User[];
+  left_chat_member?: User;
+  new_chat_title?: string;
+  new_chat_photo?: PhotoSize[];
+  delete_chat_photo?: boolean;
+  pinned_message?: Message;
+  group_chat_created?: boolean;
+  supergroup_chat_created?: boolean;
+  channel_chat_created?: boolean;
+  message_auto_delete_timer_changed?: unknown;
 }
 
 export interface Update {

@@ -5,6 +5,7 @@ import { syncChannelPost, syncEditedChannelPost } from "./post-sync.js";
 import { syncComment, syncEditedComment } from "./comment-sync.js";
 import { handleCommand } from "./commands.js";
 import { maybeRecordForward } from "./forwards.js";
+import { handleServiceMessage } from "./service-messages.js";
 import { isChatAllowed } from "../security/allowlists.js";
 
 /**
@@ -38,6 +39,7 @@ async function routeUpdate(ctx: SyncContext, platform: Platform, update: Update)
   if (update.channel_post) {
     const m = update.channel_post;
     if (await isChatAllowed(m.chat.id, connections, ctx.settings)) {
+      if (await handleServiceMessage(ctx, platform, m, connections)) return;
       await syncChannelPost(ctx, platform, m);
     }
     return;
@@ -84,6 +86,10 @@ async function routeMessage(
 
   const allowed = await isChatAllowed(msg.chat.id, connections, ctx.settings);
   if (!allowed) return;
+
+  // Service messages (member joined/left, title/pin, etc.) are never mirrored.
+  // A chat-photo change is applied to the counterpart chat instead of posting.
+  if (await handleServiceMessage(ctx, platform, msg, connections)) return;
 
   // A channel post delivered as a plain message (Bale behavior).
   if (msg.chat.type === "channel") {
