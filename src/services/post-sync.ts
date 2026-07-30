@@ -4,7 +4,7 @@ import type { ChannelConnection } from "../repositories/connections.js";
 import { SyncContext } from "./context.js";
 import { entitiesToMarkdown } from "./formatter.js";
 import { extractMedia, resolveSourceUrl, isTooLarge, type MediaDescriptor } from "./media-transfer.js";
-import { contentHash } from "./hash.js";
+import { postFingerprint } from "./hash.js";
 import { telegramMessageLink, baleMessageLink } from "./links.js";
 import { enqueueDeliver } from "./job-runner.js";
 import { ApiError } from "./bot-api.js";
@@ -82,6 +82,24 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
   if (myBotId && msg.from?.id === myBotId) return;
   if (msg.from?.is_bot) return;
 
+  // Race-proof loop guard: a mirror we just sent to `source` can echo back
+  // before its destination id was recorded (byBale/byTelegram would miss it).
+  // Identify it by content fingerprint and complete the pending mapping instead
+  // of mirroring it again. This is what stops the Telegram<->Bale post loop when
+  // a platform (Bale) doesn't mark the bot's own posts.
+  const ownerConn = await ctx.connections.findByChat(chatId);
+  if (ownerConn) {
+    const pending = await ctx.mappings.findPendingChannelMirror(ownerConn.id, source, postFingerprint(msg));
+    if (pending) {
+      if (source === "bale") {
+        await ctx.mappings.setBaleSide(pending.id, chatId, String(msg.message_id), msg.media_group_id ?? null);
+      } else {
+        await ctx.mappings.setTelegramSide(pending.id, chatId, String(msg.message_id));
+      }
+      return;
+    }
+  }
+
   const route = await resolveChannelRoute(ctx, source, chatId);
   if (!route) return;
 
@@ -95,7 +113,7 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
   const buttons = (await ctx.settings.getBool("mirror_url_buttons")) ? convertButtons(msg.reply_markup) : undefined;
 
   const media = extractMedia(msg);
-  const hash = contentHash(`${rawText}::${media?.fileId ?? ""}`);
+  const hash = postFingerprint(msg);
 
   // Create the mapping row first (source side known), fill dest side after send.
   const mappingId = await ctx.mappings.create({
@@ -268,7 +286,7 @@ export async function syncEditedChannelPost(ctx: SyncContext, source: Platform, 
   const rawText = msg.text ?? msg.caption ?? "";
   const entities = msg.text ? msg.entities : msg.caption_entities;
   const markdown = entitiesToMarkdown(rawText, entities);
-  const newHash = contentHash(`${rawText}::${extractMedia(msg)?.fileId ?? ""}`);
+  const newHash = postFingerprint(msg);
   if (mapping.content_hash === newHash) return; // no meaningful change
 
   const destApi = ctx.api(destPlatform);

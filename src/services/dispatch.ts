@@ -4,7 +4,7 @@ import { SyncContext } from "./context.js";
 import { syncChannelPost, syncEditedChannelPost } from "./post-sync.js";
 import { syncComment, syncEditedComment } from "./comment-sync.js";
 import { handleCommand } from "./commands.js";
-import { recordAutoForward } from "./forwards.js";
+import { maybeRecordForward } from "./forwards.js";
 import { isChatAllowed } from "../security/allowlists.js";
 
 /**
@@ -99,17 +99,10 @@ async function routeMessage(
       String(c.telegram_channel_id) === chatId ||
       String(c.bale_channel_id) === chatId,
   );
-  const channelId = platform === "telegram" ? conn?.telegram_channel_id : conn?.bale_channel_id;
 
   // The auto-forwarded copy of a channel post inside the discussion group is not
-  // a user comment. Detect it via is_automatic_forward, or (when a platform omits
-  // that flag) by its sender_chat being the linked channel. Record its id for
-  // comment threading, but never mirror it as a comment.
-  const isPostForward =
-    msg.is_automatic_forward === true ||
-    (msg.sender_chat != null && channelId != null && String(msg.sender_chat.id) === String(channelId));
-  if (isPostForward) {
-    await recordAutoForward(ctx, platform, msg, conn ?? null);
+  // a user comment. Record its id (for comment threading) but never mirror it.
+  if (conn && (await maybeRecordForward(ctx, platform, msg, conn))) {
     return;
   }
 

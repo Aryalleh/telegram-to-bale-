@@ -108,10 +108,10 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
     // Reply to another (already mirrored) comment -> attach to its twin.
     const destId = route.destPlatform === "bale" ? parentMapping.bale_message_id : parentMapping.telegram_message_id;
     if (destId) replyToDestId = Number(destId);
-  } else if (msg.reply_to_message?.is_automatic_forward) {
-    // Top-level comment on a post -> thread it under the mirrored post's
-    // auto-forwarded copy in the destination discussion group.
-    const target = await resolveThreadTarget(ctx, source, msg.reply_to_message);
+  } else if (msg.reply_to_message) {
+    // Top-level comment on a post: its reply target is the auto-forwarded copy
+    // of the post. Thread it under that post's copy in the destination group.
+    const target = await resolveThreadTarget(ctx, source, msg.reply_to_message, route.connection);
     if (target) replyToDestId = target;
   }
 
@@ -138,7 +138,7 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
 
   const mappingId = await ctx.mappings.create({
     connection_id: route.connection.id,
-    message_type: isReply ? "reply" : "comment",
+    message_type: parentMapping ? "reply" : "comment",
     source_platform: commentSource(source),
     parent_mapping_id: parentMapping?.id ?? null,
     telegram_chat_id: source === "telegram" ? chatId : null,

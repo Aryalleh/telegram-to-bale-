@@ -182,25 +182,89 @@ export class MappingsRepo {
   }
 
   /**
-   * Most recent channel_post mapping for a connection that has a message on
-   * `platform` but no recorded discussion-forward id yet. Used as a fallback to
-   * link an auto-forwarded post copy when the platform omits forward references.
+   * Most recent channel_post mapping for a connection still missing its
+   * discussion-forward id on `platform`. Used as a fallback to link an
+   * auto-forwarded post copy when the platform omits forward references. Does
+   * not require the platform-side message id to be recorded yet (it may still
+   * be in flight), so it is robust against send/echo ordering.
    */
   async latestPostAwaitingDiscussion(
     platform: "telegram" | "bale",
     connectionId: number,
   ): Promise<MessageMapping | null> {
     const discCol = platform === "telegram" ? "telegram_discussion_message_id" : "bale_discussion_message_id";
-    const msgCol = platform === "telegram" ? "telegram_message_id" : "bale_message_id";
+    return (
+      (await this.db
+        .prepare(
+          `SELECT * FROM message_mappings
+           WHERE message_type = 'channel_post' AND connection_id = ? AND ${discCol} IS NULL
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .bind(connectionId)
+        .first<MessageMapping>()) ?? null
+    );
+  }
+
+  /**
+   * A recently-created channel_post mapping whose `sourceSide` message id is not
+   * yet recorded but whose opposite side is — i.e. a mirror we just sent to
+   * `sourceSide` that is now echoing back before its id was stored. Matching by
+   * content fingerprint makes loop prevention robust against the send/echo race.
+   */
+  async findPendingChannelMirror(
+    connectionId: number,
+    sourceSide: "telegram" | "bale",
+    contentHash: string,
+  ): Promise<MessageMapping | null> {
+    const nullCol = sourceSide === "telegram" ? "telegram_message_id" : "bale_message_id";
+    const setCol = sourceSide === "telegram" ? "bale_message_id" : "telegram_message_id";
     return (
       (await this.db
         .prepare(
           `SELECT * FROM message_mappings
            WHERE message_type = 'channel_post' AND connection_id = ?
-             AND ${discCol} IS NULL AND ${msgCol} IS NOT NULL
+             AND ${nullCol} IS NULL AND ${setCol} IS NOT NULL AND content_hash = ?
+             AND created_at >= datetime('now', '-300 seconds')
            ORDER BY id DESC LIMIT 1`,
         )
-        .bind(connectionId)
+        .bind(connectionId, contentHash)
+        .first<MessageMapping>()) ?? null
+    );
+  }
+
+  /** Recent channel_post for this connection matching a content fingerprint and
+   * still missing its discussion id on `platform` (content-based auto-forward
+   * detection when the platform omits is_automatic_forward / forward refs). */
+  async recentPostByHashMissingDiscussion(
+    connectionId: number,
+    platform: "telegram" | "bale",
+    contentHash: string,
+  ): Promise<MessageMapping | null> {
+    const discCol = platform === "telegram" ? "telegram_discussion_message_id" : "bale_discussion_message_id";
+    return (
+      (await this.db
+        .prepare(
+          `SELECT * FROM message_mappings
+           WHERE message_type = 'channel_post' AND connection_id = ? AND content_hash = ?
+             AND ${discCol} IS NULL AND created_at >= datetime('now', '-900 seconds')
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .bind(connectionId, contentHash)
+        .first<MessageMapping>()) ?? null
+    );
+  }
+
+  /** Any channel_post for this connection matching a content fingerprint
+   * (used to resolve which post a comment threads under). */
+  async channelPostByHash(connectionId: number, contentHash: string): Promise<MessageMapping | null> {
+    return (
+      (await this.db
+        .prepare(
+          `SELECT * FROM message_mappings
+           WHERE message_type = 'channel_post' AND connection_id = ? AND content_hash = ?
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .bind(connectionId, contentHash)
         .first<MessageMapping>()) ?? null
     );
   }
