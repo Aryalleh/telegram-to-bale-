@@ -96,6 +96,34 @@ export interface Contact {
   user_id?: number;
 }
 
+export interface Sticker {
+  file_id: string;
+  file_unique_id: string;
+  type?: string;
+  is_animated?: boolean;
+  is_video?: boolean;
+  emoji?: string;
+  file_size?: number;
+}
+
+export interface Poll {
+  question: string;
+  options: { text: string }[];
+  is_anonymous?: boolean;
+  type?: string;
+}
+
+export interface Dice {
+  emoji: string;
+  value: number;
+}
+
+export interface Venue {
+  location: Location;
+  title: string;
+  address: string;
+}
+
 export interface InlineKeyboardButton {
   text: string;
   url?: string;
@@ -139,6 +167,10 @@ export interface Message {
   animation?: Animation;
   location?: Location;
   contact?: Contact;
+  sticker?: Sticker;
+  poll?: Poll;
+  dice?: Dice;
+  venue?: Venue;
 
   reply_markup?: InlineKeyboardMarkup;
 

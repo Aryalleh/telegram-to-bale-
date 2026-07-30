@@ -113,7 +113,7 @@ export class BotApiClient {
    * type (e.g. voice on some platforms) — it works regardless of URL support.
    */
   async sendMediaUpload(
-    kind: "photo" | "video" | "document" | "audio" | "voice" | "animation",
+    kind: "photo" | "video" | "document" | "audio" | "voice" | "animation" | "sticker",
     o: {
       chatId: string | number;
       bytes: ArrayBuffer;
@@ -131,8 +131,8 @@ export class BotApiClient {
   ): Promise<Message> {
     const form = new FormData();
     form.set("chat_id", String(o.chatId));
-    if (o.caption) form.set("caption", o.caption);
-    if (o.parseMode) form.set("parse_mode", o.parseMode);
+    if (o.caption && kind !== "sticker") form.set("caption", o.caption);
+    if (o.parseMode && kind !== "sticker") form.set("parse_mode", o.parseMode);
     if (o.replyToMessageId != null) form.set("reply_to_message_id", String(o.replyToMessageId));
     if (o.messageThreadId != null) form.set("message_thread_id", String(o.messageThreadId));
     if (o.disableNotification) form.set("disable_notification", "true");
@@ -188,6 +188,7 @@ export class BotApiClient {
       case "audio": return "sendAudio";
       case "voice": return "sendVoice";
       case "animation": return "sendAnimation";
+      case "sticker": return "sendSticker";
       default: return "sendDocument";
     }
   }
@@ -200,11 +201,12 @@ export class BotApiClient {
       case "audio": return "audio";
       case "voice": return "voice";
       case "animation": return "animation";
+      case "sticker": return "sticker";
       default: return "document";
     }
   }
 
-  sendMedia(kind: "photo" | "video" | "document" | "audio" | "voice" | "animation", o: SendMediaOptions): Promise<Message> {
+  sendMedia(kind: "photo" | "video" | "document" | "audio" | "voice" | "animation" | "sticker", o: SendMediaOptions): Promise<Message> {
     const params: Record<string, unknown> = {
       chat_id: o.chatId,
       caption: o.caption,
@@ -216,6 +218,11 @@ export class BotApiClient {
       performer: o.performer,
       title: o.title,
     };
+    if (kind === "sticker") {
+      // sendSticker does not accept caption/parse_mode.
+      delete params.caption;
+      delete params.parse_mode;
+    }
     params[this.mediaField(kind)] = o.media;
     return this.call<Message>(this.mediaMethod(kind), params);
   }

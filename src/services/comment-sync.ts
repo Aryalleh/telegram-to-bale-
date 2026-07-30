@@ -3,8 +3,8 @@ import type { Platform, MessageSource } from "../types/env.js";
 import type { ChannelConnection } from "../repositories/connections.js";
 import type { MessageMapping } from "../repositories/message-mappings.js";
 import { SyncContext } from "./context.js";
-import { entitiesToMarkdown, identityHeader, composeMirroredBody, sourceLink } from "./formatter.js";
-import { extractMedia, isTooLarge, transferMedia } from "./media-transfer.js";
+import { entitiesToMarkdown, escapeMarkdown, identityHeader, composeMirroredBody, sourceLink } from "./formatter.js";
+import { extractMedia, isTooLarge, transferMedia, describeSpecial } from "./media-transfer.js";
 import { telegramCommentLink, baleMessageLink, telegramCommentUrl, baleCommentUrl } from "./links.js";
 import { passesReplyPolicy } from "./reply-sync.js";
 import { resolvePostMapping } from "./forwards.js";
@@ -133,7 +133,8 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
 
   const rawText = msg.text ?? msg.caption ?? "";
   const entities = msg.text ? msg.entities : msg.caption_entities;
-  const body = entitiesToMarkdown(rawText, entities);
+  const special = !rawText ? describeSpecial(msg) : null;
+  const body = special ? escapeMarkdown(special) : entitiesToMarkdown(rawText, entities);
 
   let linkLine = "";
   if (await ctx.settings.getBool("add_source_links")) {

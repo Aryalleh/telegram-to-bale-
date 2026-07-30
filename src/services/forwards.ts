@@ -17,10 +17,27 @@ export function forwardedPostRef(m: Message): { chatId: string; messageId: strin
   return null;
 }
 
-/** Is this discussion-group message the auto-forwarded copy of a channel post? */
-function isFlaggedForward(msg: Message, channelId: string | null | undefined): boolean {
+/**
+ * Strong signal: the message is definitely the auto-forwarded copy of *our*
+ * linked channel's post (safe to link by recency).
+ */
+function isStrongForward(msg: Message, channelId: string | null | undefined): boolean {
   if (msg.is_automatic_forward === true) return true;
   if (msg.sender_chat != null && channelId != null && String(msg.sender_chat.id) === String(channelId)) return true;
+  return false;
+}
+
+/**
+ * Weak signal: the message is authored *as a channel* or forwarded *from a
+ * channel*. This still means "not a genuine user comment" (so don't mirror it),
+ * but the origin may be another channel — e.g. the auto-forwarded copy of a
+ * message that was itself forwarded — so we only link it to a mapping on a
+ * confident (content) match, never by recency.
+ */
+function isWeakForward(msg: Message): boolean {
+  if (msg.sender_chat != null && msg.sender_chat.type === "channel") return true;
+  const fwdChat = msg.forward_from_chat ?? msg.forward_origin?.chat;
+  if (fwdChat != null && fwdChat.type === "channel") return true;
   return false;
 }
 
@@ -41,33 +58,36 @@ export async function maybeRecordForward(
   connection: ChannelConnection,
 ): Promise<boolean> {
   const channelId = platform === "telegram" ? connection.telegram_channel_id : connection.bale_channel_id;
-  const flagged = isFlaggedForward(msg, channelId);
+  const strong = isStrongForward(msg, channelId);
+  const weak = strong || isWeakForward(msg);
 
-  let mapping = null;
-  if (flagged) {
-    const ref = forwardedPostRef(msg);
-    if (ref) {
-      mapping =
-        platform === "telegram"
-          ? await ctx.mappings.byTelegram(ref.chatId, ref.messageId)
-          : await ctx.mappings.byBale(ref.chatId, ref.messageId);
-    }
-    if (!mapping) {
-      mapping =
-        (await ctx.mappings.recentPostByHashMissingDiscussion(connection.id, platform, postFingerprint(msg))) ??
-        (await ctx.mappings.latestPostAwaitingDiscussion(platform, connection.id));
-    }
-  } else {
-    // Not flagged: only treat as a forward if the content matches a recent post
-    // still missing its discussion id. Otherwise it's a real comment.
+  // A confident link: by forward reference, or by content fingerprint.
+  const ref = forwardedPostRef(msg);
+  let mapping =
+    ref
+      ? platform === "telegram"
+        ? await ctx.mappings.byTelegram(ref.chatId, ref.messageId)
+        : await ctx.mappings.byBale(ref.chatId, ref.messageId)
+      : null;
+  if (!mapping) {
     mapping = await ctx.mappings.recentPostByHashMissingDiscussion(connection.id, platform, postFingerprint(msg));
+  }
+
+  if (!strong && !weak) {
+    // No forward signal at all: it's a real comment unless the content matches
+    // a recent post (mapping found above).
     if (!mapping) return false;
+  }
+
+  // Strong-only: allow the recency fallback (safe, it's definitely our channel).
+  if (!mapping && strong) {
+    mapping = await ctx.mappings.latestPostAwaitingDiscussion(platform, connection.id);
   }
 
   if (mapping) {
     await ctx.mappings.setDiscussionMessageId(mapping.id, platform, String(msg.message_id));
   }
-  // Flagged messages are never mirrored as comments, even if we couldn't map them.
+  // Anything with a forward signal is never mirrored as a comment.
   return true;
 }
 

@@ -1,7 +1,7 @@
 import type { Message } from "../types/telegram.js";
 import type { BotApiClient } from "./bot-api.js";
 
-export type MediaKind = "photo" | "video" | "document" | "audio" | "voice" | "animation";
+export type MediaKind = "photo" | "video" | "document" | "audio" | "voice" | "animation" | "sticker";
 
 export interface MediaDescriptor {
   kind: MediaKind;
@@ -57,6 +57,9 @@ export function extractMedia(msg: Message): MediaDescriptor | null {
   if (msg.voice) {
     return { kind: "voice", fileId: msg.voice.file_id, mimeType: msg.voice.mime_type, fileSize: msg.voice.file_size };
   }
+  if (msg.sticker) {
+    return { kind: "sticker", fileId: msg.sticker.file_id, fileSize: msg.sticker.file_size };
+  }
   if (msg.document) {
     return {
       kind: "document",
@@ -66,6 +69,20 @@ export function extractMedia(msg: Message): MediaDescriptor | null {
       fileSize: msg.document.file_size,
     };
   }
+  return null;
+}
+
+/**
+ * A text representation for message types that can't be transferred as media
+ * (polls, dice, venues). Returns null if the message has none of these.
+ */
+export function describeSpecial(msg: Message): string | null {
+  if (msg.poll) {
+    const opts = msg.poll.options.map((o) => `▫️ ${o.text}`).join("\n");
+    return `📊 ${msg.poll.question}\n${opts}`;
+  }
+  if (msg.dice) return `${msg.dice.emoji} ${msg.dice.value}`;
+  if (msg.venue) return `📍 ${msg.venue.title}\n${msg.venue.address}`;
   return null;
 }
 
@@ -102,6 +119,7 @@ const DEFAULT_NAMES: Record<MediaKind, string> = {
   audio: "audio.mp3",
   voice: "voice.ogg",
   animation: "animation.mp4",
+  sticker: "sticker.webp",
 };
 
 export interface TransferOptions {

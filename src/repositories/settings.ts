@@ -30,6 +30,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   transfer_standalone_bale_messages: "false",
   mirror_url_buttons: "true",
   send_silently: "false",
+
+  // Optional signature / hashtag appended to mirrored channel posts.
+  add_signature: "false",
+  signature_text: "",
   media_fallback_mode: "document", // document | source_link | notify_admin
   unsupported_content_message: "این نوع محتوا قابل انتقال نبود. لطفاً پیام اصلی را ببینید.",
 

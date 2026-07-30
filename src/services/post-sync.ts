@@ -2,8 +2,8 @@ import type { Message, InlineKeyboardMarkup, InlineKeyboardButton } from "../typ
 import type { Platform, MessageSource } from "../types/env.js";
 import type { ChannelConnection } from "../repositories/connections.js";
 import { SyncContext } from "./context.js";
-import { entitiesToMarkdown } from "./formatter.js";
-import { extractMedia, isTooLarge, transferMedia, type MediaDescriptor } from "./media-transfer.js";
+import { entitiesToMarkdown, escapeMarkdown } from "./formatter.js";
+import { extractMedia, isTooLarge, transferMedia, describeSpecial, type MediaDescriptor } from "./media-transfer.js";
 import { postFingerprint } from "./hash.js";
 import { telegramMessageLink, baleMessageLink } from "./links.js";
 import { enqueueDeliver } from "./job-runner.js";
@@ -111,7 +111,8 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
 
   const rawText = msg.text ?? msg.caption ?? "";
   const entities = msg.text ? msg.entities : msg.caption_entities;
-  const markdown = entitiesToMarkdown(rawText, entities);
+  const special = !rawText ? describeSpecial(msg) : null;
+  const markdown = special ? escapeMarkdown(special) : entitiesToMarkdown(rawText, entities);
   const buttons = (await ctx.settings.getBool("mirror_url_buttons")) ? convertButtons(msg.reply_markup) : undefined;
 
   const media = extractMedia(msg);
@@ -135,14 +136,19 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
   // reply to that post's mirror on the destination side (both directions).
   const replyToDestId = await resolveChannelReplyTarget(ctx, source, route, msg);
 
+  // If the replied-to message isn't mapped on the destination (e.g. a reply to
+  // a message forwarded from another channel), we can't reply natively — so
+  // quote its text under a "در پاسخ:" header, then apply any signature.
+  const bodyText = await decorateBody(ctx, msg, markdown, replyToDestId !== undefined);
+
   try {
     let sent: Message;
     if (media) {
-      sent = await sendMediaCrossPlatform(ctx, source, route, media, markdown, buttons, silent, replyToDestId);
+      sent = await sendMediaCrossPlatform(ctx, source, route, media, bodyText, buttons, silent, replyToDestId);
     } else {
       sent = await destApi.sendMessage({
         chatId: route.destChatId,
-        text: markdown || "(empty)",
+        text: bodyText || "(empty)",
         parseMode: "Markdown",
         replyMarkup: buttons,
         disableNotification: silent,
@@ -157,8 +163,34 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
       await ctx.mappings.setTelegramSide(mappingId, route.destChatId, String(sent.message_id));
     }
   } catch (err) {
-    await handleSendFailure(ctx, source, route, mappingId, msg, markdown, err, replyToDestId);
+    await handleSendFailure(ctx, source, route, mappingId, msg, bodyText, err, replyToDestId);
   }
+}
+
+/**
+ * Add a quoted "در پاسخ:" block (when replying to an unmapped message) and an
+ * optional signature/hashtag to the post body.
+ */
+async function decorateBody(ctx: SyncContext, msg: Message, markdown: string, replyMapped: boolean): Promise<string> {
+  let body = markdown;
+
+  const rt = msg.reply_to_message;
+  if (!replyMapped && rt && !rt.is_automatic_forward) {
+    const quoted = (rt.text ?? rt.caption ?? "").trim();
+    if (quoted) {
+      const quotedBlock = quoted
+        .split("\n")
+        .map((l) => `> ${escapeMarkdown(l)}`)
+        .join("\n");
+      body = `در پاسخ:\n${quotedBlock}\n\n${body}`.trim();
+    }
+  }
+
+  if (await ctx.settings.getBool("add_signature")) {
+    const sig = (await ctx.settings.get("signature_text"))?.trim();
+    if (sig) body = `${body}\n\n${sig}`.trim();
+  }
+  return body;
 }
 
 /**
