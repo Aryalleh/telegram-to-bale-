@@ -41,6 +41,18 @@ function fromLabel(source: Platform): string {
   return source === "telegram" ? "از تلگرام" : "از بله";
 }
 
+/**
+ * Identity-header signature of a message we produced as a mirror. Any incoming
+ * message matching this is our own mirror echoed back by the platform and must
+ * not be re-mirrored (loop prevention). Kept in sync with `identityHeader`.
+ */
+const MIRROR_HEADER_RE = /^\s*👤 .+ — (از تلگرام|از بله|from Telegram|from Bale)/;
+
+function looksLikeMirror(msg: Message): boolean {
+  const text = msg.text ?? msg.caption ?? "";
+  return MIRROR_HEADER_RE.test(text);
+}
+
 function sourceLinkLabel(source: Platform): string {
   return source === "telegram" ? "مشاهده کامنت اصلی در تلگرام" : "مشاهده کامنت اصلی در بله";
 }
@@ -63,6 +75,13 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
   // The auto-forwarded copy of the channel post is not a user comment.
   if (msg.is_automatic_forward) return;
 
+  // Loop prevention (primary): a message we generated as a mirror always starts
+  // with our identity header ("👤 <name> — از تلگرام/بله"). Recognizing that
+  // signature is timing- and platform-independent, so it stops the loop even
+  // when a platform (Bale) does not set `from.is_bot` on the bot's own messages
+  // and even before the outgoing mirror's id has been recorded in the mapping.
+  if (looksLikeMirror(msg)) return;
+
   // Loop prevention: bot-generated mirror already recorded on the source side.
   const existing =
     source === "telegram"
@@ -70,10 +89,9 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
       : await ctx.mappings.byBale(chatId, String(msg.message_id));
   if (existing) return;
 
-  // Ignore messages authored by our own bot.
+  // Ignore messages authored by our own bot (when the platform exposes it).
   const myBotId = await ctx.botId(source);
-  if (msg.from?.is_bot && myBotId && msg.from.id === myBotId) return;
-  // Ignore any bot author to avoid mirroring other bots' service messages.
+  if (myBotId && msg.from?.id === myBotId) return;
   if (msg.from?.is_bot) return;
 
   const route = await resolveDiscussionRoute(ctx, source, chatId);

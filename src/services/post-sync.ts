@@ -79,7 +79,8 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
 
   // Ignore posts authored by our own bot (best effort; channel posts are often anonymous).
   const myBotId = await ctx.botId(source);
-  if (msg.from?.is_bot && myBotId && msg.from.id === myBotId) return;
+  if (myBotId && msg.from?.id === myBotId) return;
+  if (msg.from?.is_bot) return;
 
   const route = await resolveChannelRoute(ctx, source, chatId);
   if (!route) return;
