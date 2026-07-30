@@ -15,7 +15,10 @@ export async function handleBaleWebhook(
   ctx: ExecutionContext,
   secret: string,
 ): Promise<Response> {
-  if (!validateBaleWebhook(env, secret, req)) return new Response("Forbidden", { status: 403 });
+  const sync = await SyncContext.create(env);
+  if (!validateBaleWebhook(sync.secrets.baleWebhookSecret, secret, req)) {
+    return new Response("Forbidden", { status: 403 });
+  }
 
   let update: Update;
   try {
@@ -24,7 +27,6 @@ export async function handleBaleWebhook(
     return new Response("Bad Request", { status: 400 });
   }
 
-  const sync = new SyncContext(env);
   ctx.waitUntil(
     dispatchUpdate(sync, "bale", update).catch((e) => console.error("bale dispatch error", e)),
   );

@@ -99,20 +99,34 @@
 
         <!-- Secrets / tokens -->
         <div class="card">
-          <h2>🔑 وضعیت توکن‌ها و رمزها</h2>
+          <h2>🔑 توکن‌ها و رمزها</h2>
           <p class="muted">
-            به دلایل امنیتی، توکن‌های ربات هرگز در پایگاه‌داده ذخیره نمی‌شوند. آن‌ها را با دستورهای زیر
-            تنظیم کنید (فقط وضعیت «تنظیم‌شده/نشده» اینجا نمایش داده می‌شود):
+            توکن‌های ربات و رمزهای وب‌هوک را همین‌جا وارد کنید. مقادیر به‌صورت
+            رمزنگاری‌شده (AES-GCM) در پایگاه‌داده ذخیره می‌شوند و هرگز دوباره نمایش داده نمی‌شوند —
+            فقط منبع فعلی هر مقدار («داشبورد» یا «env») دیده می‌شود. برای خالی گذاشتن یک فیلد،
+            مقدار قبلی حفظ می‌شود.
           </p>
           <table id="secrets-table"></table>
-          <div class="card" style="background: var(--panel2); margin-top: 12px;">
-            <div class="muted">دستورهای تنظیم رمزها:</div>
-            <div><code>wrangler secret put TELEGRAM_BOT_TOKEN</code></div>
-            <div><code>wrangler secret put BALE_BOT_TOKEN</code></div>
-            <div><code>wrangler secret put TELEGRAM_WEBHOOK_SECRET</code></div>
-            <div><code>wrangler secret put BALE_WEBHOOK_SECRET</code></div>
+
+          <h2 style="margin-top:16px;">ثبت / به‌روزرسانی توکن‌ها</h2>
+          <label>توکن ربات تلگرام (TELEGRAM_BOT_TOKEN)</label>
+          <input id="sec-TELEGRAM_BOT_TOKEN" type="password" autocomplete="off" placeholder="123456:ABC..." />
+          <label>توکن ربات بله (BALE_BOT_TOKEN)</label>
+          <input id="sec-BALE_BOT_TOKEN" type="password" autocomplete="off" placeholder="123456:ABC..." />
+          <label>رمز وب‌هوک تلگرام (TELEGRAM_WEBHOOK_SECRET)</label>
+          <input id="sec-TELEGRAM_WEBHOOK_SECRET" type="password" autocomplete="off" placeholder="یک رشته تصادفی طولانی" />
+          <label>رمز وب‌هوک بله (BALE_WEBHOOK_SECRET)</label>
+          <input id="sec-BALE_WEBHOOK_SECRET" type="password" autocomplete="off" placeholder="یک رشته تصادفی طولانی" />
+          <button onclick="saveSecrets()">ذخیره توکن‌ها</button>
+
+          <div class="card" style="background: var(--panel2); margin-top: 14px;">
+            <div class="muted">
+              فقط <code>ADMIN_API_SECRET</code> (رمز ورود به همین داشبورد) باید یک‌بار با CLI تنظیم شود،
+              چون کلید رمزنگاری از آن ساخته می‌شود:
+            </div>
             <div><code>wrangler secret put ADMIN_API_SECRET</code></div>
           </div>
+
           <button onclick="registerWebhooks()">ثبت خودکار وب‌هوک‌ها</button>
           <div id="webhook-result" class="muted"></div>
         </div>
@@ -270,11 +284,13 @@
           card("کارهای در صف", s.pending_jobs), card("خطاهای امروز", s.recent_errors),
         ].join("");
 
-        // secrets
+        // secrets (source per key: dashboard | env | unset)
+        const srcLabel = { dashboard: "داشبورد", env: "env", unset: "تنظیم‌نشده" };
+        const srcPill = (v) => '<span class="pill ' + (v === "unset" ? "err" : "ok") + '">' + (srcLabel[v] || v) + "</span>";
         document.getElementById("secrets-table").innerHTML =
-          "<tr><th>رمز</th><th>وضعیت</th></tr>" +
+          "<tr><th>رمز</th><th>منبع</th></tr>" +
           Object.entries(STATE.secrets).map(([k, v]) =>
-            "<tr><td><code>" + k + "</code></td><td>" + pill(v ? "تنظیم‌شده" : "تنظیم‌نشده") + "</td></tr>").join("");
+            "<tr><td><code>" + k + "</code></td><td>" + srcPill(v) + "</td></tr>").join("");
 
         // connections
         document.getElementById("connections-list").innerHTML = STATE.connections.map(c =>
@@ -341,6 +357,24 @@
       async function doAction(a) {
         const r = await api(a, "POST", {});
         toast(r.ok ? "انجام شد" : "خطا"); refresh();
+      }
+      async function saveSecrets() {
+        const keys = ["TELEGRAM_BOT_TOKEN", "BALE_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "BALE_WEBHOOK_SECRET"];
+        const payload = {};
+        for (const k of keys) {
+          const v = document.getElementById("sec-" + k).value.trim();
+          if (v) payload[k] = v;
+        }
+        if (!Object.keys(payload).length) return toast("چیزی برای ذخیره نیست");
+        const r = await api("secrets", "POST", payload);
+        if (r.ok) {
+          toast("توکن‌ها ذخیره شد (" + r.saved.join(", ") + ")");
+          STATE.secrets = r.sources;
+          keys.forEach((k) => (document.getElementById("sec-" + k).value = ""));
+          render();
+        } else {
+          toast("خطا: " + (r.error || "نامشخص"));
+        }
       }
       async function registerWebhooks() {
         const r = await api("register-webhooks", "POST", { base_url: location.origin });

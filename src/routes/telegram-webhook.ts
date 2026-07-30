@@ -17,7 +17,11 @@ export async function handleTelegramWebhook(
   secret: string,
 ): Promise<Response> {
   if (req.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
-  if (!validateTelegramWebhook(env, secret, req)) return new Response("Forbidden", { status: 403 });
+
+  const sync = await SyncContext.create(env);
+  if (!validateTelegramWebhook(sync.secrets.telegramWebhookSecret, secret, req)) {
+    return new Response("Forbidden", { status: 403 });
+  }
 
   let update: Update;
   try {
@@ -26,7 +30,6 @@ export async function handleTelegramWebhook(
     return new Response("Bad Request", { status: 400 });
   }
 
-  const sync = new SyncContext(env);
   ctx.waitUntil(
     dispatchUpdate(sync, "telegram", update).catch((e) => console.error("telegram dispatch error", e)),
   );

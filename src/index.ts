@@ -59,7 +59,7 @@ export default {
    * trigger in wrangler.jsonc (e.g. every minute) to enable it.
    */
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    const sync = new SyncContext(env);
+    const sync = await SyncContext.create(env);
     ctx.waitUntil(processDueJobs(sync, 20).then(() => undefined).catch((e) => console.error("job runner error", e)));
   },
 };

@@ -2,6 +2,8 @@ import type { Env } from "../types/env.js";
 import { SyncContext } from "../services/context.js";
 import { snapshot, buildStats } from "../services/status.js";
 import { validateAdmin } from "../security/webhook-validation.js";
+import { encryptValue } from "../security/crypto.js";
+import { WEB_MANAGED_SECRETS } from "../repositories/secure-config.js";
 import { json } from "./health.js";
 
 /**
@@ -18,7 +20,7 @@ export async function handleAdmin(
   if (!validateAdmin(env, req)) {
     return json({ error: "unauthorized" }, 401);
   }
-  const sync = new SyncContext(env);
+  const sync = await SyncContext.create(env);
   const method = req.method.toUpperCase();
 
   try {
@@ -33,12 +35,44 @@ export async function handleAdmin(
       ]);
       return json({
         snapshot: s,
-        secrets: secretStatus(env),
+        secrets: sync.secrets.sources,
         connections,
         settings,
         recent_errors: errors,
         recent_mappings: mappings,
       });
+    }
+
+    // --- Dashboard-managed secrets (encrypted at rest in D1) ---
+    if (subPath === "secrets" && method === "GET") {
+      // Never return values — only where each secret currently comes from.
+      return json({ sources: sync.secrets.sources, managed: WEB_MANAGED_SECRETS });
+    }
+    if (subPath === "secrets" && method === "POST") {
+      if (!env.ADMIN_API_SECRET) {
+        return json({ error: "ADMIN_API_SECRET must be set (via wrangler) before storing secrets from the web." }, 400);
+      }
+      const body = (await req.json()) as Record<string, unknown>;
+      const saved: string[] = [];
+      for (const key of WEB_MANAGED_SECRETS) {
+        const v = body[key];
+        if (typeof v === "string" && v.trim().length > 0) {
+          const enc = await encryptValue(env.ADMIN_API_SECRET, v.trim());
+          await sync.secureConfig.set(key, enc);
+          saved.push(key);
+        }
+      }
+      const refreshed = await SyncContext.create(env);
+      return json({ ok: true, saved, sources: refreshed.secrets.sources });
+    }
+    if (subPath.startsWith("secrets/") && method === "DELETE") {
+      const key = subPath.split("/")[1];
+      if (!(WEB_MANAGED_SECRETS as readonly string[]).includes(key)) {
+        return json({ error: "unknown secret" }, 400);
+      }
+      await sync.secureConfig.delete(key);
+      const refreshed = await SyncContext.create(env);
+      return json({ ok: true, sources: refreshed.secrets.sources });
     }
 
     if (subPath === "stats" && method === "GET") {
@@ -114,35 +148,36 @@ function emptyToNull(v: unknown): string | null {
   return s.length ? s : null;
 }
 
-/** Report whether each required secret is configured (never the value). */
-function secretStatus(env: Env): Record<string, boolean> {
-  return {
-    TELEGRAM_BOT_TOKEN: !!env.TELEGRAM_BOT_TOKEN,
-    BALE_BOT_TOKEN: !!env.BALE_BOT_TOKEN,
-    TELEGRAM_WEBHOOK_SECRET: !!env.TELEGRAM_WEBHOOK_SECRET,
-    BALE_WEBHOOK_SECRET: !!env.BALE_WEBHOOK_SECRET,
-    ADMIN_API_SECRET: !!env.ADMIN_API_SECRET,
-  };
-}
-
-/** Register both webhooks with their platforms. */
+/** Register both webhooks with their platforms using the effective secrets. */
 async function registerWebhooks(sync: SyncContext, env: Env, baseUrl: string): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
-  try {
-    out.telegram = await sync.telegram.call("setWebhook", {
-      url: `${baseUrl}/webhooks/telegram/${env.TELEGRAM_WEBHOOK_SECRET}`,
-      secret_token: env.TELEGRAM_WEBHOOK_SECRET,
-      allowed_updates: ["channel_post", "edited_channel_post", "message", "edited_message"],
-    });
-  } catch (e) {
-    out.telegram = { error: e instanceof Error ? e.message : String(e) };
+  const tgSecret = sync.secrets.telegramWebhookSecret;
+  const baleSecret = sync.secrets.baleWebhookSecret;
+
+  if (!tgSecret) {
+    out.telegram = { error: "TELEGRAM_WEBHOOK_SECRET is not set (dashboard or env)." };
+  } else {
+    try {
+      out.telegram = await sync.telegram.call("setWebhook", {
+        url: `${baseUrl}/webhooks/telegram/${tgSecret}`,
+        secret_token: tgSecret,
+        allowed_updates: ["channel_post", "edited_channel_post", "message", "edited_message"],
+      });
+    } catch (e) {
+      out.telegram = { error: e instanceof Error ? e.message : String(e) };
+    }
   }
-  try {
-    out.bale = await sync.bale.call("setWebhook", {
-      url: `${baseUrl}/webhooks/bale/${env.BALE_WEBHOOK_SECRET}`,
-    });
-  } catch (e) {
-    out.bale = { error: e instanceof Error ? e.message : String(e) };
+
+  if (!baleSecret) {
+    out.bale = { error: "BALE_WEBHOOK_SECRET is not set (dashboard or env)." };
+  } else {
+    try {
+      out.bale = await sync.bale.call("setWebhook", {
+        url: `${baseUrl}/webhooks/bale/${baleSecret}`,
+      });
+    } catch (e) {
+      out.bale = { error: e instanceof Error ? e.message : String(e) };
+    }
   }
   return out;
 }

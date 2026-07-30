@@ -9,23 +9,26 @@ export function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * Validate a Telegram webhook request:
+ * Validate a Telegram webhook request against the effective webhook secret
+ * (resolved from the dashboard-managed store or env):
  *  - the secret in the URL path must match, AND
  *  - the X-Telegram-Bot-Api-Secret-Token header must match.
  */
-export function validateTelegramWebhook(env: Env, pathSecret: string, req: Request): boolean {
-  if (!safeEqual(pathSecret, env.TELEGRAM_WEBHOOK_SECRET)) return false;
+export function validateTelegramWebhook(expectedSecret: string, pathSecret: string, req: Request): boolean {
+  if (!expectedSecret) return false;
+  if (!safeEqual(pathSecret, expectedSecret)) return false;
   const header = req.headers.get("x-telegram-bot-api-secret-token") ?? "";
-  return safeEqual(header, env.TELEGRAM_WEBHOOK_SECRET);
+  return safeEqual(header, expectedSecret);
 }
 
 /**
  * Validate a Bale webhook request. Bale does not send a secret-token header, so
  * protection relies on the long unpredictable path secret plus method checks.
  */
-export function validateBaleWebhook(env: Env, pathSecret: string, req: Request): boolean {
+export function validateBaleWebhook(expectedSecret: string, pathSecret: string, req: Request): boolean {
   if (req.method !== "POST") return false;
-  return safeEqual(pathSecret, env.BALE_WEBHOOK_SECRET);
+  if (!expectedSecret) return false;
+  return safeEqual(pathSecret, expectedSecret);
 }
 
 /** Bearer-token check for the admin API/dashboard. */

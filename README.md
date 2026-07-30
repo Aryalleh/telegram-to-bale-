@@ -65,10 +65,11 @@ src/
     job-runner.ts           Durable delivery jobs + queue draining
     commands.ts             Admin bot commands (/status, /pause, ...)
     status.ts               Status/stats snapshots
-    context.ts              Per-request bundle of repos + clients
+    context.ts              Per-request bundle of repos + clients (async factory)
+    secrets.ts              Resolve secrets from D1 (encrypted) or env
     hash.ts                 Content fingerprint (edit/duplicate detection)
-  repositories/             D1 data-access layer
-  security/                 Webhook validation + chat/admin allowlists
+  repositories/             D1 data-access layer (incl. secure-config)
+  security/                 Webhook validation, allowlists, AES-GCM crypto
   types/                    Telegram/Bale/env type definitions
 migrations/                 D1 schema (0001_initial.sql, 0002_indexes.sql)
 public/dashboard.html       Admin dashboard (served via ASSETS binding)
@@ -98,18 +99,31 @@ npm run db:init:remote     # apply migrations to the remote D1
 
 ### 3. Configure secrets
 
-Bot tokens and webhook secrets are **Cloudflare secrets** — they are never
-stored in source or in D1.
+Only **one** secret must be set via the CLI — the dashboard login password,
+which also derives the encryption key for everything else:
 
 ```bash
-wrangler secret put TELEGRAM_BOT_TOKEN
-wrangler secret put BALE_BOT_TOKEN
-wrangler secret put TELEGRAM_WEBHOOK_SECRET   # a long random string
-wrangler secret put BALE_WEBHOOK_SECRET       # a long random string
 wrangler secret put ADMIN_API_SECRET          # dashboard login token
 ```
 
+The **bot tokens and webhook secrets are entered from the dashboard** (see
+step 6). They are stored **encrypted at rest (AES-GCM)** in D1 — never in
+plaintext and never in source. If you prefer, you can still provide them as
+Cloudflare env secrets instead (the resolver falls back to env when a value is
+not set from the dashboard):
+
+```bash
+# Optional — env fallback instead of entering them in the dashboard:
+wrangler secret put TELEGRAM_BOT_TOKEN
+wrangler secret put BALE_BOT_TOKEN
+wrangler secret put TELEGRAM_WEBHOOK_SECRET
+wrangler secret put BALE_WEBHOOK_SECRET
+```
+
 For local development, copy `.dev.vars.example` to `.dev.vars` and fill it in.
+
+> Rotating `ADMIN_API_SECRET` changes the encryption key, so re-enter the
+> dashboard-stored tokens afterwards.
 
 ### 4. Deploy
 
@@ -120,8 +134,10 @@ npm run deploy
 ### 5. Register webhooks
 
 Open `https://<your-worker>.workers.dev/dashboard`, log in with your
-`ADMIN_API_SECRET`, and click **«ثبت خودکار وب‌هوک‌ها»** (Register webhooks).
-This calls `setWebhook` on both platforms pointing at:
+`ADMIN_API_SECRET`, enter the **bot tokens and webhook secrets** in the
+«توکن‌ها و رمزها» section (stored encrypted in D1), then click
+**«ثبت خودکار وب‌هوک‌ها»** (Register webhooks). This calls `setWebhook` on both
+platforms pointing at:
 
 ```
 POST /webhooks/telegram/{TELEGRAM_WEBHOOK_SECRET}
@@ -146,7 +162,8 @@ with the `ADMIN_API_SECRET` bearer token (stored in the browser's
 localStorage). From there you can:
 
 - See live status (Telegram / Bale / D1 connectivity, pending jobs, errors).
-- See which secrets are configured (values are never shown).
+- **Enter / rotate the bot tokens and webhook secrets** (encrypted at rest in
+  D1; values are never shown again — only their source: dashboard / env).
 - Register webhooks with one click.
 - Create / delete channel↔channel + group↔group connections.
 - Toggle every behavior setting and edit text settings / allowlists.
@@ -163,6 +180,9 @@ localStorage). From there you can:
 | DELETE | `/admin/connections/{id}` | Delete a connection |
 | POST | `/admin/retry` | Requeue failed jobs |
 | POST | `/admin/pause` \| `/admin/resume` | Pause / resume sync |
+| GET | `/admin/secrets` | Which secrets are set and their source (no values) |
+| POST | `/admin/secrets` | Store bot tokens / webhook secrets (encrypted) |
+| DELETE | `/admin/secrets/{key}` | Clear a dashboard-stored secret |
 | POST | `/admin/register-webhooks` | Register both webhooks |
 
 ### Bot commands (admins only)
@@ -199,7 +219,11 @@ Admin user IDs are configured via the `admin_telegram_user_ids` /
 
 ## Security
 
-- Tokens and webhook secrets live only in Cloudflare secrets.
+- Bot tokens and webhook secrets are stored **encrypted (AES-GCM)** in D1 when
+  entered from the dashboard, with the key derived from `ADMIN_API_SECRET`
+  (the only value that must be a Cloudflare secret). They can alternatively be
+  provided as env secrets. Values are never returned by the API or shown in the
+  UI after entry.
 - Telegram webhooks are validated by both the path secret and the
   `X-Telegram-Bot-Api-Secret-Token` header; Bale by a long unpredictable path +
   POST-only.
