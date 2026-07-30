@@ -279,6 +279,26 @@ export class MappingsRepo {
     );
   }
 
+  /**
+   * A recent comment/reply mapping whose stored content_hash matches — i.e. a
+   * mirror we produced (its fingerprint includes our identity header, which a
+   * genuine user message never has), now echoed back by the platform. Robust
+   * loop prevention that doesn't depend on the header rendering byte-for-byte.
+   */
+  async recentCommentByHash(contentHash: string, withinSeconds = 3600): Promise<MessageMapping | null> {
+    return (
+      (await this.db
+        .prepare(
+          `SELECT * FROM message_mappings
+           WHERE message_type IN ('comment','reply') AND content_hash = ?
+             AND created_at >= datetime('now', ?)
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .bind(contentHash, `-${Math.max(1, withinSeconds)} seconds`)
+        .first<MessageMapping>()) ?? null
+    );
+  }
+
   /** Any channel_post for this connection matching a content fingerprint
    * (used to resolve which post a comment threads under). */
   async channelPostByHash(connectionId: number, contentHash: string): Promise<MessageMapping | null> {

@@ -8,6 +8,7 @@ import { extractMedia, isTooLarge, transferMedia, describeSpecial } from "./medi
 import { telegramCommentLink, baleMessageLink, telegramCommentUrl, baleCommentUrl } from "./links.js";
 import { passesReplyPolicy } from "./reply-sync.js";
 import { resolvePostMapping } from "./forwards.js";
+import { textFingerprint } from "./hash.js";
 import { enqueueDeliver } from "./job-runner.js";
 import { ApiError } from "./bot-api.js";
 
@@ -81,6 +82,17 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
   // when a platform (Bale) does not set `from.is_bot` on the bot's own messages
   // and even before the outgoing mirror's id has been recorded in the mapping.
   if (looksLikeMirror(msg)) return;
+
+  // Loop prevention (robust): compare the incoming text's fingerprint against
+  // recently-created comment mirrors. A mirror's stored fingerprint includes our
+  // identity header, which a genuine user message never contains — so a match
+  // means this is our own mirror echoed back, even if the platform re-rendered
+  // the header (different emoji/dash) so looksLikeMirror missed it.
+  const incomingText = (msg.text ?? msg.caption ?? "").trim();
+  if (incomingText) {
+    const echoed = await ctx.mappings.recentCommentByHash(textFingerprint(incomingText));
+    if (echoed) return;
+  }
 
   // Loop prevention: bot-generated mirror already recorded on the source side.
   const existing =
@@ -158,6 +170,9 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
     connection_id: route.connection.id,
     message_type: parentMapping ? "reply" : "comment",
     source_platform: commentSource(source),
+    // Fingerprint of exactly what we send (header included), so the mirror can be
+    // recognized when it echoes back — see the loop guard above.
+    content_hash: textFingerprint(composed),
     parent_mapping_id: parentMapping?.id ?? null,
     telegram_chat_id: source === "telegram" ? chatId : null,
     telegram_message_id: source === "telegram" ? String(msg.message_id) : null,

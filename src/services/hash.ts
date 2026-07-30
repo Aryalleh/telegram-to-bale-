@@ -20,6 +20,13 @@ export function contentHash(input: string): string {
  * match the same post across platforms — used for loop prevention, auto-forward
  * detection, and comment threading.
  */
+/** Fingerprint of plain text, normalized to letters/digits only (markdown,
+ * emoji, punctuation and spacing removed) so it survives a render round-trip. */
+export function textFingerprint(text: string): string {
+  const normalized = (text ?? "").replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+  return contentHash(normalized);
+}
+
 export function postFingerprint(msg: Message): string {
   const text = msg.text ?? msg.caption ?? "";
   // Normalize away everything the markdown round-trip can change: markdown
