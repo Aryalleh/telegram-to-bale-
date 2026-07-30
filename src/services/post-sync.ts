@@ -186,11 +186,27 @@ async function decorateBody(ctx: SyncContext, msg: Message, markdown: string, re
     }
   }
 
+  // Turn the post author's signature (Telegram "sign messages") into a hashtag
+  // so the author stays identifiable on the destination platform.
   if (await ctx.settings.getBool("add_signature")) {
-    const sig = (await ctx.settings.get("signature_text"))?.trim();
-    if (sig) body = `${body}\n\n${sig}`.trim();
+    const tag = hashtagify(msg.author_signature ?? "");
+    if (tag) body = `${body}\n\n#${escapeMarkdown(tag)}`.trim();
   }
+
+  // Optional fixed signature / hashtag (admin-provided, appended verbatim).
+  const fixed = (await ctx.settings.get("signature_text"))?.trim();
+  if (fixed) body = `${body}\n\n${fixed}`.trim();
+
   return body;
+}
+
+/** Turn a display name into a hashtag-safe token ("Ali Rezaei" -> "Ali_Rezaei"). */
+function hashtagify(name: string): string {
+  return name
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^\p{L}\p{N}_]/gu, "")
+    .replace(/^_+|_+$/g, "");
 }
 
 /**

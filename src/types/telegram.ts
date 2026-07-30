@@ -139,6 +139,8 @@ export interface Message {
   message_thread_id?: number;
   from?: User;
   sender_chat?: Chat;
+  /** Signature of the post author (channels with "sign messages" enabled). */
+  author_signature?: string;
   chat: Chat;
   date: number;
   edit_date?: number;
