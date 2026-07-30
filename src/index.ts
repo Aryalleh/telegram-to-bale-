@@ -21,13 +21,13 @@ export default {
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
     try {
-      if (path === "/") {
-        return Response.redirect(url.origin + "/dashboard", 302);
-      }
-
-      if (path === "/dashboard") {
-        // Serve the static dashboard HTML from the ASSETS binding.
-        return env.ASSETS.fetch(new Request(url.origin + "/dashboard.html", req));
+      // Serve the dashboard directly (no redirect) for both "/" and "/dashboard".
+      // We fetch the asset by its exact filename; html_handling is disabled in
+      // wrangler.jsonc so the ASSETS service returns the file itself (200)
+      // instead of redirecting "/dashboard.html" -> "/dashboard" (which would
+      // otherwise cause an infinite redirect loop).
+      if (path === "/" || path === "/dashboard") {
+        return env.ASSETS.fetch(new Request(url.origin + "/dashboard.html", { method: "GET" }));
       }
 
       if (path === "/health") {

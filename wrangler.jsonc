@@ -49,7 +49,12 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": true
+    "run_worker_first": true,
+    // Serve files by their exact path. Without this, the assets service
+    // redirects "/dashboard.html" -> "/dashboard", causing a redirect loop
+    // (ERR_TOO_MANY_REDIRECTS) when the Worker fetches the file.
+    "html_handling": "none",
+    "not_found_handling": "none"
   }
 
   // Optional: enable a queue for stronger async retry handling.
