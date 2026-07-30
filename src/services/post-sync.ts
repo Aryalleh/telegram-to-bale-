@@ -131,10 +131,14 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
     bale_media_group_id: source === "bale" ? msg.media_group_id ?? null : null,
   });
 
+  // Preserve reply relationships: if this post replies to another channel post,
+  // reply to that post's mirror on the destination side (both directions).
+  const replyToDestId = await resolveChannelReplyTarget(ctx, source, route, msg);
+
   try {
     let sent: Message;
     if (media) {
-      sent = await sendMediaCrossPlatform(ctx, source, route, media, markdown, buttons, silent);
+      sent = await sendMediaCrossPlatform(ctx, source, route, media, markdown, buttons, silent, replyToDestId);
     } else {
       sent = await destApi.sendMessage({
         chatId: route.destChatId,
@@ -142,6 +146,7 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
         parseMode: "Markdown",
         replyMarkup: buttons,
         disableNotification: silent,
+        replyToMessageId: replyToDestId,
       });
     }
 
@@ -152,8 +157,31 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
       await ctx.mappings.setTelegramSide(mappingId, route.destChatId, String(sent.message_id));
     }
   } catch (err) {
-    await handleSendFailure(ctx, source, route, mappingId, msg, markdown, err);
+    await handleSendFailure(ctx, source, route, mappingId, msg, markdown, err, replyToDestId);
   }
+}
+
+/**
+ * Resolve the destination reply target for a channel post that replies to
+ * another channel post. Returns the mirrored message id on the destination
+ * platform, or undefined if the post isn't a reply or the target isn't mapped.
+ */
+async function resolveChannelReplyTarget(
+  ctx: SyncContext,
+  source: Platform,
+  route: Route,
+  msg: Message,
+): Promise<number | undefined> {
+  const replyTo = msg.reply_to_message;
+  if (!replyTo || replyTo.is_automatic_forward) return undefined;
+  const chatId = String(msg.chat.id);
+  const rtMapping =
+    source === "telegram"
+      ? await ctx.mappings.byTelegram(chatId, String(replyTo.message_id))
+      : await ctx.mappings.byBale(chatId, String(replyTo.message_id));
+  if (!rtMapping) return undefined;
+  const destId = route.destPlatform === "bale" ? rtMapping.bale_message_id : rtMapping.telegram_message_id;
+  return destId ? Number(destId) : undefined;
 }
 
 /** Attempt native media transfer; fall back per configured mode on failure. */
@@ -165,6 +193,7 @@ async function sendMediaCrossPlatform(
   caption: string,
   buttons: InlineKeyboardMarkup | undefined,
   silent: boolean,
+  replyToMessageId?: number,
 ): Promise<Message> {
   const destApi = ctx.api(route.destPlatform);
   const sourceApi = ctx.api(source);
@@ -185,6 +214,7 @@ async function sendMediaCrossPlatform(
       fileName: media.fileName,
       performer: media.performer,
       title: media.title,
+      replyToMessageId,
     });
   } catch (err) {
     if (err instanceof ApiError && err.permanent) {
@@ -198,6 +228,7 @@ async function sendMediaCrossPlatform(
           parseMode: "Markdown",
           disableNotification: silent,
           fileName: media.fileName,
+          replyToMessageId,
         });
       }
       return sendMediaFallback(ctx, source, route, caption, "Media type unsupported on destination.");
@@ -229,6 +260,7 @@ async function handleSendFailure(
   msg: Message,
   markdown: string,
   err: unknown,
+  replyToMessageId?: number,
 ): Promise<void> {
   const apiErr = err instanceof ApiError ? err : null;
   await ctx.errors.record({
@@ -250,6 +282,7 @@ async function handleSendFailure(
       kind: media ? "media" : "text",
       text: markdown || undefined,
       parseMode: "Markdown",
+      replyToMessageId,
       mediaKind: media?.kind,
       sourcePlatform: media ? source : undefined,
       fileId: media?.fileId,
