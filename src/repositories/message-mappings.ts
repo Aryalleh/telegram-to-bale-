@@ -232,6 +232,31 @@ export class MappingsRepo {
     );
   }
 
+  /** The most recent channel_post mirror this connection sent to `sourceSide`
+   * that is still awaiting its `sourceSide` message id, within a short window.
+   * A content-independent safety net for the send/echo race when a platform
+   * mangles the text enough that the fingerprint no longer matches. */
+  async latestPendingChannelMirror(
+    connectionId: number,
+    sourceSide: "telegram" | "bale",
+    withinSeconds = 45,
+  ): Promise<MessageMapping | null> {
+    const nullCol = sourceSide === "telegram" ? "telegram_message_id" : "bale_message_id";
+    const setCol = sourceSide === "telegram" ? "bale_message_id" : "telegram_message_id";
+    return (
+      (await this.db
+        .prepare(
+          `SELECT * FROM message_mappings
+           WHERE message_type = 'channel_post' AND connection_id = ?
+             AND ${nullCol} IS NULL AND ${setCol} IS NOT NULL
+             AND created_at >= datetime('now', ?)
+           ORDER BY id DESC LIMIT 1`,
+        )
+        .bind(connectionId, `-${Math.max(1, withinSeconds)} seconds`)
+        .first<MessageMapping>()) ?? null
+    );
+  }
+
   /** Recent channel_post for this connection matching a content fingerprint and
    * still missing its discussion id on `platform` (content-based auto-forward
    * detection when the platform omits is_automatic_forward / forward refs). */

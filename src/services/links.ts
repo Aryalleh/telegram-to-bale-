@@ -45,3 +45,32 @@ export function baleMessageLink(chat: Chat, messageId: number): string | null {
   }
   return null;
 }
+
+/**
+ * Public, username-based link to a Telegram comment:
+ *   https://t.me/<channel_username>/<postId>?comment=<commentId>
+ * Returns null when the channel has no public username.
+ */
+export function telegramCommentUrl(
+  channelUsername: string | null | undefined,
+  channelPostId: string | null | undefined,
+  commentId: number,
+): string | null {
+  const uname = (channelUsername ?? "").replace(/^@/, "");
+  if (uname && channelPostId) return `https://t.me/${uname}/${channelPostId}?comment=${commentId}`;
+  return null;
+}
+
+/**
+ * Public, username-based link to a Bale post (where its comments live):
+ *   https://ble.ir/<channel_username>/<postId>
+ * Returns null when the channel has no public username.
+ */
+export function baleCommentUrl(
+  channelUsername: string | null | undefined,
+  channelPostId: string | null | undefined,
+): string | null {
+  const uname = (channelUsername ?? "").replace(/^@/, "");
+  if (uname && channelPostId) return `https://ble.ir/${uname}/${channelPostId}`;
+  return null;
+}

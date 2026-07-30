@@ -72,17 +72,16 @@ export async function maybeRecordForward(
 }
 
 /**
- * Given the auto-forwarded post a top-level comment replies to, return the
- * message id to reply to in the *destination* discussion group (so the mirrored
- * comment threads under the corresponding post). Falls back to matching the
- * post by content fingerprint. Returns null if unknown.
+ * Resolve the channel_post mapping a top-level comment belongs to, from the
+ * auto-forwarded post copy it replies to — by forward reference, or as a
+ * fallback by content fingerprint. Returns null if unknown.
  */
-export async function resolveThreadTarget(
+export async function resolvePostMapping(
   ctx: SyncContext,
   source: Platform,
   autoForward: Message,
   connection?: ChannelConnection | null,
-): Promise<number | null> {
+) {
   const ref = forwardedPostRef(autoForward);
   let mapping = null;
   if (ref) {
@@ -94,8 +93,5 @@ export async function resolveThreadTarget(
   if (!mapping && connection) {
     mapping = await ctx.mappings.channelPostByHash(connection.id, postFingerprint(autoForward));
   }
-  if (!mapping) return null;
-  const destId =
-    source === "telegram" ? mapping.bale_discussion_message_id : mapping.telegram_discussion_message_id;
-  return destId ? Number(destId) : null;
+  return mapping;
 }

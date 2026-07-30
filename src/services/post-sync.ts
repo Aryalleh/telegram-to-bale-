@@ -89,7 +89,9 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
   // a platform (Bale) doesn't mark the bot's own posts.
   const ownerConn = await ctx.connections.findByChat(chatId);
   if (ownerConn) {
-    const pending = await ctx.mappings.findPendingChannelMirror(ownerConn.id, source, postFingerprint(msg));
+    const pending =
+      (await ctx.mappings.findPendingChannelMirror(ownerConn.id, source, postFingerprint(msg))) ??
+      (await ctx.mappings.latestPendingChannelMirror(ownerConn.id, source));
     if (pending) {
       if (source === "bale") {
         await ctx.mappings.setBaleSide(pending.id, chatId, String(msg.message_id), msg.media_group_id ?? null);

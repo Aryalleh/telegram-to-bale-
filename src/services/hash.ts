@@ -21,7 +21,13 @@ export function contentHash(input: string): string {
  * detection, and comment threading.
  */
 export function postFingerprint(msg: Message): string {
-  const text = (msg.text ?? msg.caption ?? "").trim();
+  const text = msg.text ?? msg.caption ?? "";
+  // Normalize away everything the markdown round-trip can change: markdown
+  // symbols, escape backslashes, punctuation, spacing and emoji. Only letters
+  // and digits remain, so the fingerprint is identical for the original post,
+  // the mirror we send, and the echo the platform sends back — even when a
+  // platform (Bale) does not strip the markdown we sent exactly as Telegram does.
+  const normalized = text.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
   const media = extractMedia(msg);
-  return contentHash(`${text}::${media?.kind ?? ""}`);
+  return contentHash(`${normalized}::${media?.kind ?? ""}`);
 }

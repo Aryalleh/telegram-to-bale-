@@ -5,9 +5,9 @@ import type { MessageMapping } from "../repositories/message-mappings.js";
 import { SyncContext } from "./context.js";
 import { entitiesToMarkdown, identityHeader, composeMirroredBody, sourceLink } from "./formatter.js";
 import { extractMedia, resolveSourceUrl, isTooLarge } from "./media-transfer.js";
-import { telegramCommentLink, baleMessageLink } from "./links.js";
+import { telegramCommentLink, baleMessageLink, telegramCommentUrl, baleCommentUrl } from "./links.js";
 import { passesReplyPolicy } from "./reply-sync.js";
-import { resolveThreadTarget } from "./forwards.js";
+import { resolvePostMapping } from "./forwards.js";
 import { enqueueDeliver } from "./job-runner.js";
 import { ApiError } from "./bot-api.js";
 
@@ -98,21 +98,28 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
   if (!route) return;
 
   // Resolve reply target (nested comment/reply threading).
-  const { parentMapping, isReply } = await resolveParent(ctx, source, msg);
+  const { parentMapping } = await resolveParent(ctx, source, msg);
 
   // Apply the reply/standalone-message policy (section 8).
   if (!(await passesReplyPolicy(ctx, source, msg, parentMapping))) return;
+
+  // Resolve which channel post this comment belongs to (top-level comments reply
+  // to the auto-forwarded post copy). Used for both threading and the source link.
+  const postMapping =
+    !parentMapping && msg.reply_to_message
+      ? await resolvePostMapping(ctx, source, msg.reply_to_message, route.connection)
+      : null;
 
   let replyToDestId: number | undefined;
   if (parentMapping) {
     // Reply to another (already mirrored) comment -> attach to its twin.
     const destId = route.destPlatform === "bale" ? parentMapping.bale_message_id : parentMapping.telegram_message_id;
     if (destId) replyToDestId = Number(destId);
-  } else if (msg.reply_to_message) {
-    // Top-level comment on a post: its reply target is the auto-forwarded copy
-    // of the post. Thread it under that post's copy in the destination group.
-    const target = await resolveThreadTarget(ctx, source, msg.reply_to_message, route.connection);
-    if (target) replyToDestId = target;
+  } else if (postMapping) {
+    // Top-level comment -> thread it under the post's copy in the dest group.
+    const destDiscId =
+      route.destPlatform === "bale" ? postMapping.bale_discussion_message_id : postMapping.telegram_discussion_message_id;
+    if (destDiscId) replyToDestId = Number(destDiscId);
   }
 
   // Build the mirrored body.
@@ -130,7 +137,17 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
 
   let linkLine = "";
   if (await ctx.settings.getBool("add_source_links")) {
-    const url = buildSourceLink(source, route.connection, msg);
+    // Prefer a public, username-based link to the post the comment is under
+    // (t.me/<user>/<post>?comment=… or ble.ir/<user>/<post>); fall back to a
+    // direct message link when the channel has no public username.
+    let url: string | null = null;
+    if (postMapping) {
+      url =
+        source === "telegram"
+          ? telegramCommentUrl(route.connection.telegram_channel_username, postMapping.telegram_message_id, msg.message_id)
+          : baleCommentUrl(route.connection.bale_channel_username, postMapping.bale_message_id);
+    }
+    if (!url) url = buildSourceLink(source, route.connection, msg);
     linkLine = sourceLink(url, sourceLinkLabel(source));
   }
 
