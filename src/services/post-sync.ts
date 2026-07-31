@@ -5,7 +5,7 @@ import { SyncContext } from "./context.js";
 import { entitiesToMarkdown, escapeMarkdown, quoteBlock, sourceLink } from "./formatter.js";
 import { extractMedia, isTooLarge, transferMedia, describeSpecial, type MediaDescriptor } from "./media-transfer.js";
 import { postFingerprint } from "./hash.js";
-import { telegramMessageLink, baleMessageLink } from "./links.js";
+import { telegramMessageLink, baleMessageLink, bestSourceMessageLink } from "./links.js";
 import { enqueueDeliver } from "./job-runner.js";
 import { ApiError } from "./bot-api.js";
 
@@ -139,7 +139,7 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
   // If the replied-to message isn't mapped on the destination (e.g. a reply to
   // a message forwarded from another channel), we can't reply natively — so
   // quote its text under a "در پاسخ:" header, then apply any signature.
-  const bodyText = await decorateBody(ctx, source, msg, markdown, replyToDestId !== undefined);
+  const bodyText = await decorateBody(ctx, source, msg, markdown, replyToDestId !== undefined, route.connection);
 
   try {
     let sent: Message;
@@ -177,6 +177,7 @@ async function decorateBody(
   msg: Message,
   markdown: string,
   replyMapped: boolean,
+  connection: ChannelConnection,
 ): Promise<string> {
   const top: string[] = [];
 
@@ -194,7 +195,7 @@ async function decorateBody(
   } else if (!replyMapped && rt && !rt.is_automatic_forward) {
     quoted = rt.text ?? rt.caption ?? "";
   }
-  const qb = quoteBlock(quoted, quoteLinkFor(source, rt));
+  const qb = quoteBlock(quoted, quoteLinkFor(source, rt, connection));
   if (qb) top.push(qb);
 
   let body = [...top, markdown].filter(Boolean).join("\n\n").trim();
@@ -212,12 +213,20 @@ async function decorateBody(
   return body;
 }
 
-/** A public link to the replied-to message on its source platform, or null. */
-function quoteLinkFor(source: Platform, replyTo: Message | undefined): string | null {
+/** A public link to the replied-to message on its source platform, or null.
+ * Prefers the configured channel username so the link is clickable by anyone. */
+function quoteLinkFor(source: Platform, replyTo: Message | undefined, conn: ChannelConnection): string | null {
   if (!replyTo) return null;
-  return source === "telegram"
-    ? telegramMessageLink(replyTo.chat, replyTo.message_id)
-    : baleMessageLink(replyTo.chat, replyTo.message_id);
+  const chatId = String(replyTo.chat.id);
+  const channelUsername =
+    source === "telegram"
+      ? chatId === String(conn.telegram_channel_id)
+        ? conn.telegram_channel_username
+        : null
+      : chatId === String(conn.bale_channel_id)
+        ? conn.bale_channel_username
+        : null;
+  return bestSourceMessageLink(source, replyTo.chat, replyTo.message_id, channelUsername);
 }
 
 /** "🔁 forwarded from <channel>" line when the message was forwarded from a channel. */

@@ -47,6 +47,27 @@ export function baleMessageLink(chat: Chat, messageId: number): string | null {
 }
 
 /**
+ * Best public link to a message on its source platform: prefer a username-based
+ * link (t.me/<user>/<id> or ble.ir/<user>/<id>) — using the chat's own username
+ * or a caller-supplied channel username — and fall back to the private
+ * (t.me/c/…) form. Returns null when no link can be built.
+ */
+export function bestSourceMessageLink(
+  source: "telegram" | "bale",
+  chat: Chat,
+  messageId: number,
+  channelUsername?: string | null,
+): string | null {
+  const uname = (chat.username ?? channelUsername ?? "").replace(/^@/, "");
+  if (uname) {
+    return source === "telegram"
+      ? `https://t.me/${uname}/${messageId}`
+      : `https://ble.ir/${uname}/${messageId}`;
+  }
+  return source === "telegram" ? telegramMessageLink(chat, messageId) : baleMessageLink(chat, messageId);
+}
+
+/**
  * Public, username-based link to a Telegram comment:
  *   https://t.me/<channel_username>/<postId>?comment=<commentId>
  * Returns null when the channel has no public username.
