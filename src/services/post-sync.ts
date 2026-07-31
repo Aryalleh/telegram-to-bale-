@@ -4,7 +4,7 @@ import type { ChannelConnection } from "../repositories/connections.js";
 import { SyncContext } from "./context.js";
 import { entitiesToMarkdown, escapeMarkdown, quoteBlock, sourceLink } from "./formatter.js";
 import { extractMedia, isTooLarge, transferMedia, describeSpecial, type MediaDescriptor } from "./media-transfer.js";
-import { postFingerprint } from "./hash.js";
+import { postFingerprint, outgoingPostFingerprint } from "./hash.js";
 import { telegramMessageLink, baleMessageLink, bestSourceMessageLink } from "./links.js";
 import { enqueueDeliver } from "./job-runner.js";
 import { ApiError } from "./bot-api.js";
@@ -114,16 +114,29 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
   const special = !rawText ? describeSpecial(msg) : null;
   const markdown = special ? escapeMarkdown(special) : entitiesToMarkdown(rawText, entities);
   const buttons = (await ctx.settings.getBool("mirror_url_buttons")) ? convertButtons(msg.reply_markup) : undefined;
-
   const media = extractMedia(msg);
-  const hash = postFingerprint(msg);
 
-  // Create the mapping row first (source side known), fill dest side after send.
+  // Preserve reply relationships: reply to the mirror of the replied-to post.
+  const replyToDestId = await resolveChannelReplyTarget(ctx, source, route, msg);
+
+  // Add forwarded-from / quote / signature decorations to the text body.
+  const bodyText = await decorateBody(ctx, source, msg, markdown, replyToDestId !== undefined, route.connection);
+
+  // Location and contact are sent natively (so the echo is the same type).
+  const nativeLocation = !!msg.location && !msg.venue;
+  const nativeContact = !nativeLocation && !!msg.contact;
+
+  // Store the fingerprint of the content we actually send, so the echo (which is
+  // that content re-received) matches it and the loop guard completes the mapping
+  // instead of mirroring it again.
+  const contentHashValue =
+    nativeLocation || nativeContact ? postFingerprint(msg) : outgoingPostFingerprint(bodyText, media?.kind);
+
   const mappingId = await ctx.mappings.create({
     connection_id: route.connection.id,
     message_type: "channel_post",
     source_platform: sourceLabel(source),
-    content_hash: hash,
+    content_hash: contentHashValue,
     telegram_chat_id: source === "telegram" ? chatId : null,
     telegram_message_id: source === "telegram" ? String(msg.message_id) : null,
     telegram_media_group_id: source === "telegram" ? msg.media_group_id ?? null : null,
@@ -132,18 +145,18 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
     bale_media_group_id: source === "bale" ? msg.media_group_id ?? null : null,
   });
 
-  // Preserve reply relationships: if this post replies to another channel post,
-  // reply to that post's mirror on the destination side (both directions).
-  const replyToDestId = await resolveChannelReplyTarget(ctx, source, route, msg);
-
-  // If the replied-to message isn't mapped on the destination (e.g. a reply to
-  // a message forwarded from another channel), we can't reply natively — so
-  // quote its text under a "در پاسخ:" header, then apply any signature.
-  const bodyText = await decorateBody(ctx, source, msg, markdown, replyToDestId !== undefined, route.connection);
-
   try {
     let sent: Message;
-    if (media) {
+    if (nativeLocation) {
+      sent = await destApi.sendLocation(route.destChatId, msg.location!.latitude, msg.location!.longitude, {
+        replyToMessageId: replyToDestId,
+      });
+    } else if (nativeContact) {
+      sent = await destApi.sendContact(route.destChatId, msg.contact!.phone_number, msg.contact!.first_name, {
+        lastName: msg.contact!.last_name,
+        replyToMessageId: replyToDestId,
+      });
+    } else if (media) {
       sent = await sendMediaCrossPlatform(ctx, source, route, media, bodyText, buttons, silent, replyToDestId);
     } else {
       sent = await destApi.sendMessage({
@@ -359,22 +372,47 @@ async function handleSendFailure(
   if (!apiErr || !apiErr.permanent) {
     // Enqueue a durable, self-contained retry.
     const media = extractMedia(msg);
-    await enqueueDeliver(ctx, {
-      destPlatform: route.destPlatform,
-      destChatId: route.destChatId,
-      kind: media ? "media" : "text",
-      text: markdown || undefined,
-      parseMode: "Markdown",
-      replyToMessageId,
-      mediaKind: media?.kind,
-      sourcePlatform: media ? source : undefined,
-      fileId: media?.fileId,
-      fileName: media?.fileName,
-      performer: media?.performer,
-      title: media?.title,
-      mappingId,
-      mappingSide: route.destPlatform,
-    });
+    if (msg.location && !msg.venue) {
+      await enqueueDeliver(ctx, {
+        destPlatform: route.destPlatform,
+        destChatId: route.destChatId,
+        kind: "location",
+        latitude: msg.location.latitude,
+        longitude: msg.location.longitude,
+        replyToMessageId,
+        mappingId,
+        mappingSide: route.destPlatform,
+      });
+    } else if (msg.contact) {
+      await enqueueDeliver(ctx, {
+        destPlatform: route.destPlatform,
+        destChatId: route.destChatId,
+        kind: "contact",
+        phoneNumber: msg.contact.phone_number,
+        firstName: msg.contact.first_name,
+        lastName: msg.contact.last_name,
+        replyToMessageId,
+        mappingId,
+        mappingSide: route.destPlatform,
+      });
+    } else {
+      await enqueueDeliver(ctx, {
+        destPlatform: route.destPlatform,
+        destChatId: route.destChatId,
+        kind: media ? "media" : "text",
+        text: markdown || undefined,
+        parseMode: "Markdown",
+        replyToMessageId,
+        mediaKind: media?.kind,
+        sourcePlatform: media ? source : undefined,
+        fileId: media?.fileId,
+        fileName: media?.fileName,
+        performer: media?.performer,
+        title: media?.title,
+        mappingId,
+        mappingSide: route.destPlatform,
+      });
+    }
   } else {
     await ctx.mappings.setStatus(mappingId, "outdated");
     await ctx.notifyAdmin(`❌ Failed to mirror ${source} post ${msg.message_id}: ${apiErr.message}`);

@@ -27,14 +27,36 @@ export function textFingerprint(text: string): string {
   return contentHash(normalized);
 }
 
+function normalize(s: string): string {
+  return s.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+}
+
+/**
+ * Fingerprint of a *received* message by its essential content. Location and
+ * contact messages fingerprint by their coordinates / phone (they are sent
+ * natively, so the echo is the same type); everything else fingerprints by its
+ * visible text + media kind. This is what the loop guard compares an incoming
+ * message against, and it matches the value stored when the mirror was sent.
+ */
 export function postFingerprint(msg: Message): string {
-  const text = msg.text ?? msg.caption ?? "";
-  // Normalize away everything the markdown round-trip can change: markdown
-  // symbols, escape backslashes, punctuation, spacing and emoji. Only letters
-  // and digits remain, so the fingerprint is identical for the original post,
-  // the mirror we send, and the echo the platform sends back — even when a
-  // platform (Bale) does not strip the markdown we sent exactly as Telegram does.
-  const normalized = text.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+  if (msg.location && !msg.venue) {
+    const lat = msg.location.latitude.toFixed(5);
+    const lng = msg.location.longitude.toFixed(5);
+    return contentHash(`loc:${lat},${lng}`);
+  }
+  if (msg.contact) {
+    return contentHash(`con:${normalize(msg.contact.phone_number)}`);
+  }
   const media = extractMedia(msg);
-  return contentHash(`${normalized}::${media?.kind ?? ""}`);
+  return contentHash(`${normalize(msg.text ?? msg.caption ?? "")}::${media?.kind ?? ""}`);
+}
+
+/**
+ * Fingerprint of *outgoing* text/media content (what we actually send, after
+ * decoration such as quotes and signatures). Stored as a mirror's content_hash
+ * so the echo — which is exactly this content re-received — matches it, closing
+ * the loop even when the sent content differs from the original message.
+ */
+export function outgoingPostFingerprint(bodyText: string, mediaKind?: string): string {
+  return contentHash(`${normalize(bodyText)}::${mediaKind ?? ""}`);
 }
