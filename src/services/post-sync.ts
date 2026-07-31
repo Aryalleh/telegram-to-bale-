@@ -2,7 +2,7 @@ import type { Message, InlineKeyboardMarkup, InlineKeyboardButton } from "../typ
 import type { Platform, MessageSource } from "../types/env.js";
 import type { ChannelConnection } from "../repositories/connections.js";
 import { SyncContext } from "./context.js";
-import { entitiesToMarkdown, escapeMarkdown, quoteBlock } from "./formatter.js";
+import { entitiesToMarkdown, escapeMarkdown, quoteBlock, sourceLink } from "./formatter.js";
 import { extractMedia, isTooLarge, transferMedia, describeSpecial, type MediaDescriptor } from "./media-transfer.js";
 import { postFingerprint } from "./hash.js";
 import { telegramMessageLink, baleMessageLink } from "./links.js";
@@ -139,7 +139,7 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
   // If the replied-to message isn't mapped on the destination (e.g. a reply to
   // a message forwarded from another channel), we can't reply natively — so
   // quote its text under a "در پاسخ:" header, then apply any signature.
-  const bodyText = await decorateBody(ctx, msg, markdown, replyToDestId !== undefined);
+  const bodyText = await decorateBody(ctx, source, msg, markdown, replyToDestId !== undefined);
 
   try {
     let sent: Message;
@@ -168,15 +168,25 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
 }
 
 /**
- * Add a quoted "در پاسخ:" block (when replying to an unmapped message) and an
- * optional signature/hashtag to the post body.
+ * Prepend a "forwarded from" line and a quoted block, and append the author
+ * signature/hashtag, to a post body.
  */
-async function decorateBody(ctx: SyncContext, msg: Message, markdown: string, replyMapped: boolean): Promise<string> {
-  let body = markdown;
+async function decorateBody(
+  ctx: SyncContext,
+  source: Platform,
+  msg: Message,
+  markdown: string,
+  replyMapped: boolean,
+): Promise<string> {
+  const top: string[] = [];
 
-  // Show quoted text as 💬 «…»: a partial quote is always shown (Bale can't
-  // render a partial quote natively); a full reply is shown only when its target
-  // isn't mapped on the destination (otherwise we reply to the twin natively).
+  // "🔁 forwarded from <channel>" (hyperlinked when the source is public).
+  const fwd = forwardAttribution(source, msg);
+  if (fwd) top.push(fwd);
+
+  // Show quoted text as 💬 «…», hyperlinked to the original message. A partial
+  // quote is always shown (Bale has no native partial quote); a full reply is
+  // shown only when its target isn't mapped (native reply is used otherwise).
   const rt = msg.reply_to_message;
   let quoted = "";
   if (msg.quote?.text) {
@@ -184,11 +194,12 @@ async function decorateBody(ctx: SyncContext, msg: Message, markdown: string, re
   } else if (!replyMapped && rt && !rt.is_automatic_forward) {
     quoted = rt.text ?? rt.caption ?? "";
   }
-  const qb = quoteBlock(quoted);
-  if (qb) body = `${qb}\n\n${body}`.trim();
+  const qb = quoteBlock(quoted, quoteLinkFor(source, rt));
+  if (qb) top.push(qb);
 
-  // Turn the post author's signature (Telegram "sign messages") into a hashtag
-  // so the author stays identifiable on the destination platform.
+  let body = [...top, markdown].filter(Boolean).join("\n\n").trim();
+
+  // Turn the post author's signature (Telegram "sign messages") into a hashtag.
   if (await ctx.settings.getBool("add_signature")) {
     const tag = hashtagify(msg.author_signature ?? "");
     if (tag) body = `${body}\n\n#${escapeMarkdown(tag)}`.trim();
@@ -199,6 +210,28 @@ async function decorateBody(ctx: SyncContext, msg: Message, markdown: string, re
   if (fixed) body = `${body}\n\n${fixed}`.trim();
 
   return body;
+}
+
+/** A public link to the replied-to message on its source platform, or null. */
+function quoteLinkFor(source: Platform, replyTo: Message | undefined): string | null {
+  if (!replyTo) return null;
+  return source === "telegram"
+    ? telegramMessageLink(replyTo.chat, replyTo.message_id)
+    : baleMessageLink(replyTo.chat, replyTo.message_id);
+}
+
+/** "🔁 forwarded from <channel>" line when the message was forwarded from a channel. */
+function forwardAttribution(source: Platform, msg: Message): string {
+  const fwdChat = msg.forward_from_chat ?? msg.forward_origin?.chat;
+  if (!fwdChat || fwdChat.type !== "channel") return "";
+  const fwdMsgId = msg.forward_from_message_id ?? msg.forward_origin?.message_id;
+  const title = fwdChat.title ?? fwdChat.username ?? "کانال";
+  let url: string | null = null;
+  if (fwdChat.username) {
+    const base = source === "telegram" ? "https://t.me" : "https://ble.ir";
+    url = fwdMsgId ? `${base}/${fwdChat.username}/${fwdMsgId}` : `${base}/${fwdChat.username}`;
+  }
+  return `🔁 ${sourceLink(url, `فوروارد شده از ${title}`) || `فوروارد شده از ${escapeMarkdown(title)}`}`;
 }
 
 /** Turn a display name into a hashtag-safe token ("Ali Rezaei" -> "Ali_Rezaei"). */

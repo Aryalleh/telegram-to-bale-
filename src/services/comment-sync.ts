@@ -5,7 +5,7 @@ import type { MessageMapping } from "../repositories/message-mappings.js";
 import { SyncContext } from "./context.js";
 import { entitiesToMarkdown, escapeMarkdown, identityHeader, composeMirroredBody, sourceLink, quoteBlock } from "./formatter.js";
 import { extractMedia, isTooLarge, transferMedia, describeSpecial } from "./media-transfer.js";
-import { telegramCommentLink, baleMessageLink, telegramCommentUrl, baleCommentUrl } from "./links.js";
+import { telegramCommentLink, telegramMessageLink, baleMessageLink, telegramCommentUrl, baleCommentUrl } from "./links.js";
 import { passesReplyPolicy } from "./reply-sync.js";
 import { resolvePostMapping } from "./forwards.js";
 import { textFingerprint } from "./hash.js";
@@ -148,9 +148,16 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
   const special = !rawText ? describeSpecial(msg) : null;
   let body = special ? escapeMarkdown(special) : entitiesToMarkdown(rawText, entities);
 
-  // Show a partial quote as 💬 «…» (Bale can't render partial quotes natively).
+  // Show a partial quote as 💬 «…», hyperlinked to the original message
+  // (Bale can't render partial quotes natively).
   if (msg.quote?.text?.trim()) {
-    body = `${quoteBlock(msg.quote.text)}\n\n${body}`.trim();
+    const rt = msg.reply_to_message;
+    const quoteUrl = rt
+      ? source === "telegram"
+        ? telegramMessageLink(rt.chat, rt.message_id)
+        : baleMessageLink(rt.chat, rt.message_id)
+      : null;
+    body = `${quoteBlock(msg.quote.text, quoteUrl)}\n\n${body}`.trim();
   }
 
   let linkLine = "";

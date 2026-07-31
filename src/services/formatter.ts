@@ -122,13 +122,16 @@ export function identityHeader(msg: Message, opts: IdentityOptions): string {
 }
 
 /**
- * Render quoted text (a partial quote, or a replied-to message that can't be
- * linked natively on the destination) as: 💬 «quoted text». Uses guillemets and
+ * Render quoted text as: 💬 «quoted text». When a url is given the guillemet
+ * text becomes a hyperlink to the original quoted message. Uses guillemets and
  * an emoji so it renders regardless of Markdown blockquote support.
  */
-export function quoteBlock(text: string): string {
+export function quoteBlock(text: string, url?: string | null): string {
   const t = text.trim();
   if (!t) return "";
+  if (url) {
+    return `💬 [«${escapeLinkLabel(t)}»](${url})`;
+  }
   return `💬 «${escapeMarkdown(t)}»`;
 }
 
