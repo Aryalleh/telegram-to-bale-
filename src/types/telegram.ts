@@ -149,6 +149,8 @@ export interface Message {
   /** Telegram sets this on the channel post auto-forwarded into the group. */
   is_automatic_forward?: boolean;
   reply_to_message?: Message;
+  /** The specific fragment quoted when replying with a partial quote. */
+  quote?: { text: string; entities?: MessageEntity[]; position?: number; is_manual?: boolean };
 
   /** Forward references (present on the discussion-group auto-forward copy). */
   forward_from_chat?: Chat;

@@ -121,6 +121,17 @@ export function identityHeader(msg: Message, opts: IdentityOptions): string {
   return `👤 ${who} — ${escapeMarkdown(opts.fromLabel)}`;
 }
 
+/**
+ * Render quoted text (a partial quote, or a replied-to message that can't be
+ * linked natively on the destination) as: 💬 «quoted text». Uses guillemets and
+ * an emoji so it renders regardless of Markdown blockquote support.
+ */
+export function quoteBlock(text: string): string {
+  const t = text.trim();
+  if (!t) return "";
+  return `💬 «${escapeMarkdown(t)}»`;
+}
+
 /** Build a hyperlink line, or empty string if url is missing. */
 export function sourceLink(url: string | null, label: string): string {
   if (!url) return "";

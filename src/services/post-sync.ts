@@ -2,7 +2,7 @@ import type { Message, InlineKeyboardMarkup, InlineKeyboardButton } from "../typ
 import type { Platform, MessageSource } from "../types/env.js";
 import type { ChannelConnection } from "../repositories/connections.js";
 import { SyncContext } from "./context.js";
-import { entitiesToMarkdown, escapeMarkdown } from "./formatter.js";
+import { entitiesToMarkdown, escapeMarkdown, quoteBlock } from "./formatter.js";
 import { extractMedia, isTooLarge, transferMedia, describeSpecial, type MediaDescriptor } from "./media-transfer.js";
 import { postFingerprint } from "./hash.js";
 import { telegramMessageLink, baleMessageLink } from "./links.js";
@@ -174,17 +174,18 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
 async function decorateBody(ctx: SyncContext, msg: Message, markdown: string, replyMapped: boolean): Promise<string> {
   let body = markdown;
 
+  // Show quoted text as 💬 «…»: a partial quote is always shown (Bale can't
+  // render a partial quote natively); a full reply is shown only when its target
+  // isn't mapped on the destination (otherwise we reply to the twin natively).
   const rt = msg.reply_to_message;
-  if (!replyMapped && rt && !rt.is_automatic_forward) {
-    const quoted = (rt.text ?? rt.caption ?? "").trim();
-    if (quoted) {
-      const quotedBlock = quoted
-        .split("\n")
-        .map((l) => `> ${escapeMarkdown(l)}`)
-        .join("\n");
-      body = `در پاسخ:\n${quotedBlock}\n\n${body}`.trim();
-    }
+  let quoted = "";
+  if (msg.quote?.text) {
+    quoted = msg.quote.text;
+  } else if (!replyMapped && rt && !rt.is_automatic_forward) {
+    quoted = rt.text ?? rt.caption ?? "";
   }
+  const qb = quoteBlock(quoted);
+  if (qb) body = `${qb}\n\n${body}`.trim();
 
   // Turn the post author's signature (Telegram "sign messages") into a hashtag
   // so the author stays identifiable on the destination platform.
