@@ -35,6 +35,24 @@ export async function dispatchUpdate(ctx: SyncContext, platform: Platform, updat
 async function routeUpdate(ctx: SyncContext, platform: Platform, update: Update): Promise<void> {
   const connections = await ctx.connections.getEnabled();
 
+  const anyMsg = update.channel_post ?? update.edited_channel_post ?? update.message ?? update.edited_message;
+  const kind = update.channel_post
+    ? "channel_post"
+    : update.edited_channel_post
+      ? "edited_channel_post"
+      : update.message
+        ? "message"
+        : update.edited_message
+          ? "edited_message"
+          : "other";
+  if (anyMsg) {
+    const allowed = await isChatAllowed(anyMsg.chat.id, connections, ctx.settings);
+    console.log(
+      `[disp] ${platform} ${kind} chat=${anyMsg.chat.id}(${anyMsg.chat.type}) msg=${anyMsg.message_id} allowed=${allowed} from=${anyMsg.from?.id ?? "-"}${anyMsg.from?.is_bot ? "(bot)" : ""} sender_chat=${anyMsg.sender_chat?.id ?? "-"} auto_fwd=${anyMsg.is_automatic_forward ?? false}`,
+    );
+    if (!allowed) console.log(`[disp] REJECTED not-allowlisted chat=${anyMsg.chat.id}`);
+  }
+
   // --- Channel posts (bidirectional) ---
   if (update.channel_post) {
     const m = update.channel_post;
@@ -89,7 +107,10 @@ async function routeMessage(
 
   // Service messages (member joined/left, title/pin, etc.) are never mirrored.
   // A chat-photo change is applied to the counterpart chat instead of posting.
-  if (await handleServiceMessage(ctx, platform, msg, connections)) return;
+  if (await handleServiceMessage(ctx, platform, msg, connections)) {
+    console.log(`[disp] service message -> not mirrored (msg=${msg.message_id})`);
+    return;
+  }
 
   // A channel post delivered as a plain message (Bale behavior).
   if (msg.chat.type === "channel") {
@@ -106,9 +127,15 @@ async function routeMessage(
       String(c.bale_channel_id) === chatId,
   );
 
+  if (!conn) {
+    console.log(`[disp] no connection for discussion chat=${chatId} -> skip`);
+    return;
+  }
+
   // The auto-forwarded copy of a channel post inside the discussion group is not
   // a user comment. Record its id (for comment threading) but never mirror it.
-  if (conn && (await maybeRecordForward(ctx, platform, msg, conn))) {
+  if (await maybeRecordForward(ctx, platform, msg, conn)) {
+    console.log(`[disp] detected as post auto-forward -> recorded, not mirrored (msg=${msg.message_id})`);
     return;
   }
 
@@ -118,5 +145,6 @@ async function routeMessage(
     if (handled) return;
   }
 
+  console.log(`[disp] -> syncComment (msg=${msg.message_id})`);
   await syncComment(ctx, platform, msg);
 }

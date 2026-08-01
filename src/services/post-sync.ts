@@ -93,6 +93,7 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
       (await ctx.mappings.findPendingChannelMirror(ownerConn.id, source, postFingerprint(msg))) ??
       (await ctx.mappings.latestPendingChannelMirror(ownerConn.id, source));
     if (pending) {
+      console.log(`[post] skip: echo of our mirror (completed mapping ${pending.id}, msg=${msg.message_id})`);
       if (source === "bale") {
         await ctx.mappings.setBaleSide(pending.id, chatId, String(msg.message_id), msg.media_group_id ?? null);
       } else {
@@ -103,7 +104,7 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
   }
 
   const route = await resolveChannelRoute(ctx, source, chatId);
-  if (!route) return;
+  if (!route) return void console.log(`[post] skip: no channel route for chat=${chatId} (is this the configured channel with a counterpart?)`);
 
   const destApi = ctx.api(route.destPlatform);
   const sourceApi = ctx.api(source);
@@ -169,6 +170,7 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
       });
     }
 
+    console.log(`[post] MIRRORED ${source}->${route.destPlatform} src_msg=${msg.message_id} dest_msg=${sent.message_id}`);
     // Record the destination side on the mapping.
     if (route.destPlatform === "bale") {
       await ctx.mappings.setBaleSide(mappingId, route.destChatId, String(sent.message_id), sent.media_group_id ?? null);
@@ -176,6 +178,7 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
       await ctx.mappings.setTelegramSide(mappingId, route.destChatId, String(sent.message_id));
     }
   } catch (err) {
+    console.log(`[post] SEND FAILED ${source}->${route.destPlatform} msg=${msg.message_id}: ${err instanceof Error ? err.message : String(err)}`);
     await handleSendFailure(ctx, source, route, mappingId, msg, bodyText, err, replyToDestId);
   }
 }

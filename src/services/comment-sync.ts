@@ -69,19 +69,19 @@ function commentSource(source: Platform): MessageSource {
 export async function syncComment(ctx: SyncContext, source: Platform, msg: Message): Promise<void> {
   const chatId = String(msg.chat.id);
 
-  if (!(await ctx.settings.getBool("sync_comments"))) return;
-  if (await ctx.settings.getBool("paused")) return;
-  if (await ctx.settings.getBool("paused_comments")) return;
+  if (!(await ctx.settings.getBool("sync_comments"))) return void console.log("[cmt] skip: sync_comments off");
+  if (await ctx.settings.getBool("paused")) return void console.log("[cmt] skip: paused");
+  if (await ctx.settings.getBool("paused_comments")) return void console.log("[cmt] skip: paused_comments");
 
   // The auto-forwarded copy of the channel post is not a user comment.
-  if (msg.is_automatic_forward) return;
+  if (msg.is_automatic_forward) return void console.log("[cmt] skip: is_automatic_forward");
 
   // Loop prevention (primary): a message we generated as a mirror always starts
   // with our identity header ("👤 <name> — از تلگرام/بله"). Recognizing that
   // signature is timing- and platform-independent, so it stops the loop even
   // when a platform (Bale) does not set `from.is_bot` on the bot's own messages
   // and even before the outgoing mirror's id has been recorded in the mapping.
-  if (looksLikeMirror(msg)) return;
+  if (looksLikeMirror(msg)) return void console.log("[cmt] skip: looksLikeMirror");
 
   // Loop prevention (robust): compare the incoming text's fingerprint against
   // recently-created comment mirrors. A mirror's stored fingerprint includes our
@@ -91,7 +91,7 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
   const incomingText = (msg.text ?? msg.caption ?? "").trim();
   if (incomingText) {
     const echoed = await ctx.mappings.recentCommentByHash(textFingerprint(incomingText));
-    if (echoed) return;
+    if (echoed) return void console.log("[cmt] skip: content-hash echo");
   }
 
   // Loop prevention: bot-generated mirror already recorded on the source side.
@@ -99,16 +99,16 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
     source === "telegram"
       ? await ctx.mappings.byTelegram(chatId, String(msg.message_id))
       : await ctx.mappings.byBale(chatId, String(msg.message_id));
-  if (existing) return;
+  if (existing) return void console.log("[cmt] skip: already mapped");
 
   // Ignore only *our own* bot's messages (mirrors). Other bots and anonymous
   // senders are genuine content and are mirrored. Our own mirror is also caught
   // by looksLikeMirror / the content-hash guard above, so this is belt-and-braces.
   const myBotId = await ctx.botId(source);
-  if (myBotId && msg.from?.id === myBotId) return;
+  if (myBotId && msg.from?.id === myBotId) return void console.log("[cmt] skip: own bot");
 
   const route = await resolveDiscussionRoute(ctx, source, chatId);
-  if (!route) return;
+  if (!route) return void console.log(`[cmt] skip: no discussion route for chat=${chatId} (check bale_discussion_id/telegram_discussion_id in the connection)`);
 
   // Resolve reply target (nested comment/reply threading).
   const { parentMapping } = await resolveParent(ctx, source, msg);
@@ -205,12 +205,14 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
 
   try {
     const sent = await deliverComment(ctx, source, route, msg, composed, replyToDestId);
+    console.log(`[cmt] MIRRORED ${source}->${route.destPlatform} src_msg=${msg.message_id} dest_msg=${sent.message_id}`);
     if (route.destPlatform === "bale") {
       await ctx.mappings.setBaleSide(mappingId, route.destChatId, String(sent.message_id));
     } else {
       await ctx.mappings.setTelegramSide(mappingId, route.destChatId, String(sent.message_id), sent.message_thread_id ? String(sent.message_thread_id) : null);
     }
   } catch (err) {
+    console.log(`[cmt] SEND FAILED ${source}->${route.destPlatform} msg=${msg.message_id}: ${err instanceof Error ? err.message : String(err)}`);
     const apiErr = err instanceof ApiError ? err : null;
     await ctx.errors.record({
       platform: route.destPlatform,
