@@ -77,10 +77,12 @@ export async function syncChannelPost(ctx: SyncContext, source: Platform, msg: M
       : await ctx.mappings.byBale(chatId, String(msg.message_id));
   if (existingBySource) return;
 
-  // Ignore posts authored by our own bot (best effort; channel posts are often anonymous).
+  // Ignore only *our own* bot's posts (Bale->TG / TG->Bale mirror echoes).
+  // Posts made via any *other* bot (a channel admin's posting bot) are genuine
+  // and must be mirrored — the content-fingerprint loop guard below still stops
+  // our own echoes even when a platform doesn't expose the author.
   const myBotId = await ctx.botId(source);
-  if (myBotId && msg.from?.id === myBotId) return;
-  if (msg.from?.is_bot) return;
+  if (myBotId && msg.from?.id === myBotId) return void console.log("[post] skip: own bot");
 
   // Race-proof loop guard: a mirror we just sent to `source` can echo back
   // before its destination id was recorded (byBale/byTelegram would miss it).
