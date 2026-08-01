@@ -142,6 +142,45 @@ export function sourceLink(url: string | null, label: string): string {
 }
 
 /**
+ * "🔁 فوروارد شده از <source>" line for a forwarded message. Covers forwards
+ * from a channel (hyperlinked when public), a group, a user or bot, and a
+ * privacy-hidden user. Returns "" when the message isn't a forward.
+ */
+export function forwardAttribution(platform: "telegram" | "bale", msg: Message): string {
+  const origin = msg.forward_origin;
+  let name: string | null = null;
+  let url: string | null = null;
+
+  const channelChat = (msg.forward_from_chat?.type === "channel" && msg.forward_from_chat) ||
+    (origin?.chat?.type === "channel" && origin?.chat) || null;
+
+  if (channelChat) {
+    name = channelChat.title ?? channelChat.username ?? "کانال";
+    const msgId = msg.forward_from_message_id ?? origin?.message_id;
+    if (channelChat.username) {
+      const base = platform === "telegram" ? "https://t.me" : "https://ble.ir";
+      url = msgId ? `${base}/${channelChat.username}/${msgId}` : `${base}/${channelChat.username}`;
+    }
+  } else if (msg.forward_from_chat) {
+    name = msg.forward_from_chat.title ?? msg.forward_from_chat.username ?? "چت";
+  } else if (origin?.sender_chat) {
+    name = origin.sender_chat.title ?? origin.sender_chat.username ?? "چت";
+  } else if (msg.forward_from) {
+    name = displayName(msg.forward_from);
+  } else if (origin?.sender_user) {
+    name = displayName(origin.sender_user);
+  } else if (msg.forward_sender_name) {
+    name = msg.forward_sender_name;
+  } else if (origin?.sender_user_name) {
+    name = origin.sender_user_name;
+  }
+
+  if (!name) return "";
+  const inner = url ? sourceLink(url, `فوروارد شده از ${name}`) : `فوروارد شده از ${escapeMarkdown(name)}`;
+  return `🔁 ${inner}`;
+}
+
+/**
  * Compose the full mirrored comment/reply body:
  *   👤 Name — from X
  *

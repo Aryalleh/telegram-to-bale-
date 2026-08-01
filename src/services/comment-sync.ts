@@ -3,7 +3,7 @@ import type { Platform, MessageSource } from "../types/env.js";
 import type { ChannelConnection } from "../repositories/connections.js";
 import type { MessageMapping } from "../repositories/message-mappings.js";
 import { SyncContext } from "./context.js";
-import { entitiesToMarkdown, escapeMarkdown, identityHeader, composeMirroredBody, sourceLink, quoteBlock } from "./formatter.js";
+import { entitiesToMarkdown, escapeMarkdown, identityHeader, composeMirroredBody, sourceLink, quoteBlock, forwardAttribution } from "./formatter.js";
 import { extractMedia, isTooLarge, transferMedia, describeSpecial } from "./media-transfer.js";
 import { telegramCommentLink, baleMessageLink, telegramCommentUrl, baleCommentUrl, bestSourceMessageLink } from "./links.js";
 import { passesReplyPolicy } from "./reply-sync.js";
@@ -101,10 +101,11 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
       : await ctx.mappings.byBale(chatId, String(msg.message_id));
   if (existing) return;
 
-  // Ignore messages authored by our own bot (when the platform exposes it).
+  // Ignore only *our own* bot's messages (mirrors). Other bots and anonymous
+  // senders are genuine content and are mirrored. Our own mirror is also caught
+  // by looksLikeMirror / the content-hash guard above, so this is belt-and-braces.
   const myBotId = await ctx.botId(source);
   if (myBotId && msg.from?.id === myBotId) return;
-  if (msg.from?.is_bot) return;
 
   const route = await resolveDiscussionRoute(ctx, source, chatId);
   if (!route) return;
@@ -164,6 +165,10 @@ export async function syncComment(ctx: SyncContext, source: Platform, msg: Messa
     const quoteUrl = rt ? bestSourceMessageLink(source, rt.chat, rt.message_id, chUser) : null;
     body = `${quoteBlock(msg.quote.text, quoteUrl)}\n\n${body}`.trim();
   }
+
+  // "🔁 forwarded from …" when the comment is a forwarded message.
+  const fwd = forwardAttribution(source, msg);
+  if (fwd) body = `${fwd}\n\n${body}`.trim();
 
   let linkLine = "";
   if (await ctx.settings.getBool("add_source_links")) {

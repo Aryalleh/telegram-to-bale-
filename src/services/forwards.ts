@@ -18,26 +18,19 @@ export function forwardedPostRef(m: Message): { chatId: string; messageId: strin
 }
 
 /**
- * Strong signal: the message is definitely the auto-forwarded copy of *our*
- * linked channel's post (safe to link by recency).
+ * The message is (definitely) the auto-forwarded copy of *our* linked channel's
+ * post: an automatic forward, or authored as / forwarded from our own channel.
+ * All signals are exact matches to our channel id, so genuine comments —
+ * including messages from bots, anonymous senders, or forwards from *other*
+ * chats — are never mistaken for the post copy.
  */
 function isStrongForward(msg: Message, channelId: string | null | undefined): boolean {
   if (msg.is_automatic_forward === true) return true;
-  if (msg.sender_chat != null && channelId != null && String(msg.sender_chat.id) === String(channelId)) return true;
-  return false;
-}
-
-/**
- * Weak signal: the message is authored *as a channel* or forwarded *from a
- * channel*. This still means "not a genuine user comment" (so don't mirror it),
- * but the origin may be another channel — e.g. the auto-forwarded copy of a
- * message that was itself forwarded — so we only link it to a mapping on a
- * confident (content) match, never by recency.
- */
-function isWeakForward(msg: Message): boolean {
-  if (msg.sender_chat != null && msg.sender_chat.type === "channel") return true;
+  if (channelId == null) return false;
+  const cid = String(channelId);
+  if (msg.sender_chat != null && String(msg.sender_chat.id) === cid) return true;
   const fwdChat = msg.forward_from_chat ?? msg.forward_origin?.chat;
-  if (fwdChat != null && fwdChat.type === "channel") return true;
+  if (fwdChat != null && String(fwdChat.id) === cid) return true;
   return false;
 }
 
@@ -59,9 +52,8 @@ export async function maybeRecordForward(
 ): Promise<boolean> {
   const channelId = platform === "telegram" ? connection.telegram_channel_id : connection.bale_channel_id;
   const strong = isStrongForward(msg, channelId);
-  const weak = strong || isWeakForward(msg);
 
-  // A confident link: by forward reference, or by content fingerprint.
+  // Try to link this to a channel_post: by forward reference or content fingerprint.
   const ref = forwardedPostRef(msg);
   let mapping =
     ref
@@ -73,22 +65,23 @@ export async function maybeRecordForward(
     mapping = await ctx.mappings.recentPostByHashMissingDiscussion(connection.id, platform, postFingerprint(msg));
   }
 
-  if (!strong && !weak) {
-    // No forward signal at all: it's a real comment unless the content matches
-    // a recent post (mapping found above).
-    if (!mapping) return false;
-  }
-
-  // Strong-only: allow the recency fallback (safe, it's definitely our channel).
-  if (!mapping && strong) {
-    mapping = await ctx.mappings.latestPostAwaitingDiscussion(platform, connection.id);
-  }
-
   if (mapping) {
+    // Matched a recent post (by ref or content) -> it's the auto-forwarded copy.
     await ctx.mappings.setDiscussionMessageId(mapping.id, platform, String(msg.message_id));
+    return true;
   }
-  // Anything with a forward signal is never mirrored as a comment.
-  return true;
+
+  if (strong) {
+    // Definitely our channel's post copy but unmatched (race) — skip mirroring
+    // and link it by recency, which is safe here.
+    const m = await ctx.mappings.latestPostAwaitingDiscussion(platform, connection.id);
+    if (m) await ctx.mappings.setDiscussionMessageId(m.id, platform, String(msg.message_id));
+    return true;
+  }
+
+  // A genuine discussion message (user, bot, anonymous, or a forward from
+  // elsewhere) — let it be mirrored as a comment.
+  return false;
 }
 
 /**

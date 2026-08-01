@@ -2,7 +2,7 @@ import type { Message, InlineKeyboardMarkup, InlineKeyboardButton } from "../typ
 import type { Platform, MessageSource } from "../types/env.js";
 import type { ChannelConnection } from "../repositories/connections.js";
 import { SyncContext } from "./context.js";
-import { entitiesToMarkdown, escapeMarkdown, quoteBlock, sourceLink } from "./formatter.js";
+import { entitiesToMarkdown, escapeMarkdown, quoteBlock, forwardAttribution } from "./formatter.js";
 import { extractMedia, isTooLarge, transferMedia, describeSpecial, type MediaDescriptor } from "./media-transfer.js";
 import { postFingerprint, outgoingPostFingerprint } from "./hash.js";
 import { telegramMessageLink, baleMessageLink, bestSourceMessageLink } from "./links.js";
@@ -242,19 +242,6 @@ function quoteLinkFor(source: Platform, replyTo: Message | undefined, conn: Chan
   return bestSourceMessageLink(source, replyTo.chat, replyTo.message_id, channelUsername);
 }
 
-/** "🔁 forwarded from <channel>" line when the message was forwarded from a channel. */
-function forwardAttribution(source: Platform, msg: Message): string {
-  const fwdChat = msg.forward_from_chat ?? msg.forward_origin?.chat;
-  if (!fwdChat || fwdChat.type !== "channel") return "";
-  const fwdMsgId = msg.forward_from_message_id ?? msg.forward_origin?.message_id;
-  const title = fwdChat.title ?? fwdChat.username ?? "کانال";
-  let url: string | null = null;
-  if (fwdChat.username) {
-    const base = source === "telegram" ? "https://t.me" : "https://ble.ir";
-    url = fwdMsgId ? `${base}/${fwdChat.username}/${fwdMsgId}` : `${base}/${fwdChat.username}`;
-  }
-  return `🔁 ${sourceLink(url, `فوروارد شده از ${title}`) || `فوروارد شده از ${escapeMarkdown(title)}`}`;
-}
 
 /** Turn a display name into a hashtag-safe token ("Ali Rezaei" -> "Ali_Rezaei"). */
 function hashtagify(name: string): string {

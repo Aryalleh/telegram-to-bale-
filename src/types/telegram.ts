@@ -152,10 +152,19 @@ export interface Message {
   /** The specific fragment quoted when replying with a partial quote. */
   quote?: { text: string; entities?: MessageEntity[]; position?: number; is_manual?: boolean };
 
-  /** Forward references (present on the discussion-group auto-forward copy). */
+  /** Forward references (present on forwarded messages / the auto-forward copy). */
+  forward_from?: User;
   forward_from_chat?: Chat;
   forward_from_message_id?: number;
-  forward_origin?: { type?: string; chat?: Chat; message_id?: number };
+  forward_sender_name?: string;
+  forward_origin?: {
+    type?: string;
+    chat?: Chat;
+    message_id?: number;
+    sender_user?: User;
+    sender_user_name?: string;
+    sender_chat?: Chat;
+  };
 
   text?: string;
   caption?: string;
